@@ -1,0 +1,18 @@
+# Connect IQ build artifacts
+bin/
+out/
+*.iq
+*.barrel
+*.prg
+*.debug.xml
+
+# Editor/project files (do not commit machine-specific settings)
+.vscode/
+.idea/
+*.launch.json
+
+# Developer keys/secrets (never commit)
+*.key
+*.p12
+developerKey*
+
