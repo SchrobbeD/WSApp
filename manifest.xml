@@ -7,18 +7,21 @@
     entry="WSApp"
     launcherIcon="@Drawables.LauncherIcon"
     minSdkVersion="4.0.0"
-    version="0.1.0">
+    version="0.2.0">
 
     <iq:products>
       <iq:product id="fr265"/>
       <iq:product id="fr265s"/>
     </iq:products>
 
-    <iq:permissions/>
+    <iq:permissions>
+      <iq:uses-permission id="Fit"/>
+      <iq:uses-permission id="SensorHistory"/>
+      <iq:uses-permission id="UserProfile"/>
+    </iq:permissions>
 
     <iq:languages>
       <iq:language>eng</iq:language>
     </iq:languages>
   </iq:application>
 </iq:manifest>
-

@@ -1,14 +1,29 @@
-using Toybox.Application as App;
-using Toybox.WatchUi as WatchUi;
+import Toybox.Application;
+import Toybox.Lang;
+import Toybox.WatchUi;
 
-class WSApp extends App.AppBase {
+//! Return shared WallStrikeState from app instance.
+function appWallState() as WallStrikeState {
+    return (Application.getApp() as WSApp).wallState;
+}
+
+class WSApp extends Application.AppBase {
+
+    var wallState as WallStrikeState;
 
     function initialize() {
         AppBase.initialize();
+        wallState = new WallStrikeState();
     }
 
-    function getInitialView() {
-        return [ new WSAppView() ];
+    function getInitialView() as [Views] or [Views, InputDelegates] {
+        var st = wallState;
+        if (st.setupComplete) {
+            return [new WallStrikeHubView(), new WallStrikeHubDelegate()];
+        }
+        if (!st.bootDone) {
+            return [new WallStrikeBootView(), new WallStrikeBootDelegate()];
+        }
+        return [new WallStrikeWizardView(), new WallStrikeWizardDelegate()];
     }
 }
-
