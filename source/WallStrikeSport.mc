@@ -74,9 +74,9 @@ class WallStrikeSportView extends WatchUi.View {
         var fhMd = dc.getFontHeight(Graphics.FONT_MEDIUM);
         var sparkH = 32;
         var blockH = fhXt + 4 + fhMd + 2 + fhXt + 2 + fhXt + 8 + sparkH;
-        var contentTop = (footTop - 8 - blockH) / 2;
-        if (contentTop < 4) {
-            contentTop = 4;
+        var contentTop = (footTop - wsTopSafe() - blockH) / 2 + wsTopSafe();
+        if (contentTop < wsTopSafe()) {
+            contentTop = wsTopSafe();
         }
 
         var ainfo = Activity.getActivityInfo();

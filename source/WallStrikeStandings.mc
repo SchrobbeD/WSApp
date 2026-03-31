@@ -21,10 +21,12 @@ class WallStrikeStandingsView extends WatchUi.View {
         var mid = w / 2;
         var footH = standingsFooterHeight();
         var footTop = h - footH;
-        var headerH = dc.getFontHeight(Graphics.FONT_SMALL) + 12;
+        var headerH = wsTopSafe();
 
         dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
         dc.drawText(mid, 10, Graphics.FONT_SMALL, "Scores", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(mid, 10 + dc.getFontHeight(Graphics.FONT_SMALL) + 2, Graphics.FONT_XTINY, st.getSystemLabel() + " " + st.getSystemDetailLabel(), Graphics.TEXT_JUSTIFY_CENTER);
 
         var indices = [] as Array<Number>;
         var i = 0;
@@ -55,6 +57,9 @@ class WallStrikeStandingsView extends WatchUi.View {
         for (i = 0; i < st.playerCount; i++) {
             var idx = indices[i];
             var line = st.playerNames[idx] + "  " + st.scores[idx].toString();
+            if (st.systemId == 2 && st.matchInProgress) {
+                line = line + "  L" + st.lives[idx];
+            }
             dc.drawText(mid, listTop + i * rowH, Graphics.FONT_XTINY, line, Graphics.TEXT_JUSTIFY_CENTER);
         }
 
@@ -70,12 +75,12 @@ class WallStrikeStandingsView extends WatchUi.View {
     }
 }
 
-class WallStrikeStandingsDelegate extends WatchUi.InputDelegate {
+class WallStrikeStandingsDelegate extends WatchUi.BehaviorDelegate {
 
     var _view as WallStrikeStandingsView;
 
     function initialize(view as WallStrikeStandingsView) {
-        InputDelegate.initialize();
+        BehaviorDelegate.initialize();
         _view = view;
     }
 

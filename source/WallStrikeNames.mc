@@ -2,8 +2,16 @@ import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.WatchUi;
 
+function namesDrawFocusOutline(dc as Graphics.Dc, x as Number, y as Number, bw as Number, bh as Number) as Void {
+    dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
+    dc.drawLine(x, y, x + bw, y);
+    dc.drawLine(x, y + bh, x + bw, y + bh);
+    dc.drawLine(x, y, x, y + bh);
+    dc.drawLine(x + bw, y, x + bw, y + bh);
+}
+
 function namesHeaderBottom() as Number {
-    return 36;
+    return wsTopSafe();
 }
 
 class WallStrikeNamesView extends WatchUi.View {
@@ -34,33 +42,32 @@ class WallStrikeNamesView extends WatchUi.View {
         var h = dc.getHeight();
         var mid = w / 2;
         var topY = namesHeaderBottom();
+        var bottomY = h - wsBottomSafe();
         var rowCount = st.playerCount + 1;
         var fhXt = dc.getFontHeight(Graphics.FONT_XTINY);
-        var minRow = fhXt + 6;
-        var ideal = (h - topY) / rowCount;
-        var rowH = ideal;
-        if (rowH < minRow) {
-            rowH = minRow;
-        }
-        var blockH = rowCount * rowH;
-        var listTop = topY + (h - topY - blockH) / 2;
+        var minRow = fhXt + 4;
+        var rowH = wsListRowHeightInRange(topY, bottomY, rowCount, minRow, 40);
+        var listTop = wsListTopYInRange(topY, bottomY, rowCount, rowH);
         _tapRowH = rowH;
         _tapListTop = listTop;
 
-        var blockBottom = listTop + rowCount * rowH;
+        var blockBottom = wsListBottomY(listTop, rowCount, rowH);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(mid, 8, Graphics.FONT_SMALL, "Names", Graphics.TEXT_JUSTIFY_CENTER);
+        var fhSm = dc.getFontHeight(Graphics.FONT_SMALL);
+        dc.drawText(mid, wsCenterY(4, topY, fhSm), Graphics.FONT_SMALL, "Names", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(4, topY, w - 4, topY);
+        var left = wsListLeftX();
+        var right = wsListRightX(dc);
+        dc.drawLine(left, topY, right, topY);
 
         var i = 0;
         for (i = 0; i <= rowCount; i++) {
             var yy = listTop + i * rowH;
-            dc.drawLine(4, yy, w - 4, yy);
+            dc.drawLine(left, yy, right, yy);
         }
-        dc.drawLine(4, listTop, 4, blockBottom);
-        dc.drawLine(w - 4, listTop, w - 4, blockBottom);
+        dc.drawLine(left, listTop, left, blockBottom);
+        dc.drawLine(right, listTop, right, blockBottom);
 
         for (i = 0; i < st.playerCount; i++) {
             var rowTop = listTop + i * rowH;
@@ -71,16 +78,70 @@ class WallStrikeNamesView extends WatchUi.View {
         var nextTop = listTop + st.playerCount * rowH;
         dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
         dc.drawText(mid, nextTop + (rowH - fhXt) / 2, Graphics.FONT_XTINY, "Next", Graphics.TEXT_JUSTIFY_CENTER);
+
+        var fr = st.namesRowFocus;
+        if (fr < 0) {
+            fr = 0;
+        }
+        if (fr > st.playerCount) {
+            fr = st.playerCount;
+        }
+        namesDrawFocusOutline(dc, left + 2, listTop + fr * rowH, right - left - 4, rowH);
+
+        // Intentionally no bottom helper text in names view.
     }
 }
 
-class WallStrikeNamesDelegate extends WatchUi.InputDelegate {
+class WallStrikeNamesDelegate extends WatchUi.BehaviorDelegate {
 
     var _view as WallStrikeNamesView;
 
     function initialize(v as WallStrikeNamesView) {
-        InputDelegate.initialize();
+        BehaviorDelegate.initialize();
         _view = v;
+    }
+
+    function namesActivateIndex(st as WallStrikeState, idx as Number) as Void {
+        if (idx < st.playerCount) {
+            if ((WatchUi has :TextPicker)) {
+                WatchUi.pushView(
+                    new WatchUi.TextPicker(st.playerNames[idx]),
+                    new WallStrikePickNameDelegate(idx),
+                    WatchUi.SLIDE_DOWN
+                );
+            }
+            return;
+        }
+        st.setupComplete = true;
+        WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_LEFT);
+    }
+
+    function onPreviousPage() as Boolean {
+        var st = appWallState();
+        var maxR = st.playerCount;
+        st.namesRowFocus--;
+        if (st.namesRowFocus < 0) {
+            st.namesRowFocus = maxR;
+        }
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onNextPage() as Boolean {
+        var st = appWallState();
+        var maxR = st.playerCount;
+        st.namesRowFocus++;
+        if (st.namesRowFocus > maxR) {
+            st.namesRowFocus = 0;
+        }
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onSelect() as Boolean {
+        var st = appWallState();
+        namesActivateIndex(st, st.namesRowFocus);
+        return true;
     }
 
     function onTap(clickEvent as WatchUi.ClickEvent) as Boolean {
@@ -106,18 +167,8 @@ class WallStrikeNamesDelegate extends WatchUi.InputDelegate {
         if (idx >= rowCount) {
             return true;
         }
-        if (idx < st.playerCount) {
-            if ((WatchUi has :TextPicker)) {
-                WatchUi.pushView(
-                    new WatchUi.TextPicker(st.playerNames[idx]),
-                    new WallStrikePickNameDelegate(idx),
-                    WatchUi.SLIDE_DOWN
-                );
-            }
-            return true;
-        }
-        st.setupComplete = true;
-        WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_LEFT);
+        st.namesRowFocus = idx;
+        namesActivateIndex(st, idx);
         return true;
     }
 }

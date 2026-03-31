@@ -5,18 +5,18 @@ import Toybox.WatchUi;
 
 //! Pixels reserved for title + match line (tap in this strip still opens Sport).
 function hubHeaderHeight() as Number {
-    return 52;
+    return wsTopSafe();
 }
 
 function hubDividerY1(screenH as Number) as Number {
     var hb = hubHeaderHeight();
-    var band = (screenH - hb) / 3;
+    var band = (screenH - wsBottomSafe() - hb) / 3;
     return hb + band;
 }
 
 function hubDividerY2(screenH as Number) as Number {
     var hb = hubHeaderHeight();
-    var band = (screenH - hb) / 3;
+    var band = (screenH - wsBottomSafe() - hb) / 3;
     return hb + 2 * band;
 }
 
@@ -36,10 +36,43 @@ function textYCenteredInBand(yTop as Number, yBottom as Number, fontH as Number)
     return y;
 }
 
+function hubMaxBand(st as WallStrikeState) as Number {
+    if (st.sportOnlyMode) {
+        return 0;
+    }
+    return 2;
+}
+
+function drawFocusOutline(dc as Graphics.Dc, x as Number, y as Number, bw as Number, bh as Number) as Void {
+    dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
+    dc.drawLine(x, y, x + bw, y);
+    dc.drawLine(x, y + bh, x + bw, y + bh);
+    dc.drawLine(x, y, x, y + bh);
+    dc.drawLine(x + bw, y, x + bw, y + bh);
+}
+
+function drawBandLabel(dc as Graphics.Dc, mid as Number, yTop as Number, yBottom as Number, title as String, titleColor as Number) as Void {
+    var fhTitle = dc.getFontHeight(Graphics.FONT_SMALL);
+    var y = textYCenteredInBand(yTop, yBottom, fhTitle);
+    dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
+    dc.drawText(mid, y, Graphics.FONT_SMALL, title, Graphics.TEXT_JUSTIFY_CENTER);
+}
+
 class WallStrikeHubView extends WatchUi.View {
 
     function initialize() {
         View.initialize();
+    }
+
+    function onShow() as Void {
+        var st = appWallState();
+        var maxB = hubMaxBand(st);
+        if (st.hubBandFocus > maxB) {
+            st.hubBandFocus = maxB;
+        }
+        if (st.hubBandFocus < 0) {
+            st.hubBandFocus = 0;
+        }
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
@@ -53,92 +86,86 @@ class WallStrikeHubView extends WatchUi.View {
         var y2 = hubDividerY2(h);
         var st = appWallState();
 
-        var line = "Match ";
-        if (st.sportOnlyMode) {
-            line = "Sport only";
-        } else if (st.matchesPlayed >= st.matchTotal) {
-            line = line + "done";
-        } else {
-            line = line + (st.matchesPlayed + 1) + "/" + st.matchTotal;
-        }
-
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        var fhS = dc.getFontHeight(Graphics.FONT_SMALL);
-        var fhX = dc.getFontHeight(Graphics.FONT_XTINY);
-        var headerBlock = fhS + 4 + fhX;
-        var yTitle = textYCenteredInBand(2, hb - 2, headerBlock);
+        var yTitle = textYCenteredInBand(2, hb - 2, dc.getFontHeight(Graphics.FONT_SMALL));
         dc.drawText(mid, yTitle, Graphics.FONT_SMALL, "WallStrike", Graphics.TEXT_JUSTIFY_CENTER);
-        dc.drawText(mid, yTitle + fhS + 4, Graphics.FONT_XTINY, line, Graphics.TEXT_JUSTIFY_CENTER);
 
         drawUiDivider(dc, y1);
         drawUiDivider(dc, y2);
 
-        var fhRow = dc.getFontHeight(Graphics.FONT_SMALL);
-        dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(
-            mid,
-            textYCenteredInBand(hb, y1, fhRow),
-            Graphics.FONT_SMALL,
-            "SPORT",
-            Graphics.TEXT_JUSTIFY_CENTER
-        );
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(
-            mid,
-            textYCenteredInBand(hb, y1, fhRow) + fhRow + 2,
-            Graphics.FONT_XTINY,
-            "FIT / stats",
-            Graphics.TEXT_JUSTIFY_CENTER
-        );
+        drawBandLabel(dc, mid, hb, y1, "SPORT", Graphics.COLOR_BLUE);
 
         if (st.sportOnlyMode) {
-            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(mid, textYCenteredInBand(y1, y2, fhRow), Graphics.FONT_SMALL, "GAME", Graphics.TEXT_JUSTIFY_CENTER);
-            dc.drawText(mid, textYCenteredInBand(y1, y2, fhRow) + fhRow + 2, Graphics.FONT_XTINY, "off", Graphics.TEXT_JUSTIFY_CENTER);
-            dc.drawText(mid, textYCenteredInBand(y2, h - 4, fhRow), Graphics.FONT_SMALL, "SCORES", Graphics.TEXT_JUSTIFY_CENTER);
-            dc.drawText(mid, textYCenteredInBand(y2, h - 4, fhRow) + fhRow + 2, Graphics.FONT_XTINY, "off", Graphics.TEXT_JUSTIFY_CENTER);
+            drawBandLabel(dc, mid, y1, y2, "GAME", Graphics.COLOR_DK_GRAY);
+            drawBandLabel(dc, mid, y2, h - wsBottomSafe(), "STANDINGS", Graphics.COLOR_DK_GRAY);
         } else {
-            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(
-                mid,
-                textYCenteredInBand(y1, y2, fhRow),
-                Graphics.FONT_SMALL,
-                "GAME",
-                Graphics.TEXT_JUSTIFY_CENTER
-            );
-            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(
-                mid,
-                textYCenteredInBand(y1, y2, fhRow) + fhRow + 2,
-                Graphics.FONT_XTINY,
-                "eliminate",
-                Graphics.TEXT_JUSTIFY_CENTER
-            );
-
-            dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(
-                mid,
-                textYCenteredInBand(y2, h - 4, fhRow),
-                Graphics.FONT_SMALL,
-                "SCORES",
-                Graphics.TEXT_JUSTIFY_CENTER
-            );
-            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(
-                mid,
-                textYCenteredInBand(y2, h - 4, fhRow) + fhRow + 2,
-                Graphics.FONT_XTINY,
-                "standings",
-                Graphics.TEXT_JUSTIFY_CENTER
-            );
+            drawBandLabel(dc, mid, y1, y2, "GAME", Graphics.COLOR_GREEN);
+            drawBandLabel(dc, mid, y2, h - wsBottomSafe(), "STANDINGS", Graphics.COLOR_YELLOW);
         }
+
+        var fb = st.hubBandFocus;
+        if (fb == 0) {
+            drawFocusOutline(dc, 6, hb, w - 12, y1 - hb);
+        } else if (fb == 1 && !st.sportOnlyMode) {
+            drawFocusOutline(dc, 6, y1, w - 12, y2 - y1);
+        } else if (fb == 2 && !st.sportOnlyMode) {
+            drawFocusOutline(dc, 6, y2, w - 12, h - wsBottomSafe() - y2);
+        }
+
+        // Bottom helper text intentionally removed.
     }
 }
 
-class WallStrikeHubDelegate extends WatchUi.InputDelegate {
+class WallStrikeHubDelegate extends WatchUi.BehaviorDelegate {
 
     function initialize() {
-        InputDelegate.initialize();
+        BehaviorDelegate.initialize();
+    }
+
+    function hubActivateBand(st as WallStrikeState, band as Number) as Void {
+        if (band == 0) {
+            var sv = new WallStrikeSportView();
+            WatchUi.switchToView(sv, new WallStrikeSportDelegate(sv), WatchUi.SLIDE_LEFT);
+            return;
+        }
+        if (st.sportOnlyMode) {
+            return;
+        }
+        if (band == 1) {
+            var gv = new WallStrikeGameView();
+            WatchUi.switchToView(gv, new WallStrikeGameDelegate(gv), WatchUi.SLIDE_LEFT);
+            return;
+        }
+        var tv = new WallStrikeStandingsView();
+        WatchUi.switchToView(tv, new WallStrikeStandingsDelegate(tv), WatchUi.SLIDE_LEFT);
+    }
+
+    function onPreviousPage() as Boolean {
+        var st = appWallState();
+        var maxB = hubMaxBand(st);
+        st.hubBandFocus--;
+        if (st.hubBandFocus < 0) {
+            st.hubBandFocus = maxB;
+        }
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onNextPage() as Boolean {
+        var st = appWallState();
+        var maxB = hubMaxBand(st);
+        st.hubBandFocus++;
+        if (st.hubBandFocus > maxB) {
+            st.hubBandFocus = 0;
+        }
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onSelect() as Boolean {
+        var st = appWallState();
+        hubActivateBand(st, st.hubBandFocus);
+        return true;
     }
 
     function onTap(clickEvent as WatchUi.ClickEvent) as Boolean {
@@ -149,20 +176,17 @@ class WallStrikeHubDelegate extends WatchUi.InputDelegate {
         var y2 = hubDividerY2(h);
         var st = appWallState();
         if (y < y1) {
-            var sv = new WallStrikeSportView();
-            WatchUi.switchToView(sv, new WallStrikeSportDelegate(sv), WatchUi.SLIDE_LEFT);
+            hubActivateBand(st, 0);
             return true;
         }
         if (st.sportOnlyMode) {
             return true;
         }
         if (y < y2) {
-            var gv = new WallStrikeGameView();
-            WatchUi.switchToView(gv, new WallStrikeGameDelegate(gv), WatchUi.SLIDE_LEFT);
+            hubActivateBand(st, 1);
             return true;
         }
-        var tv = new WallStrikeStandingsView();
-        WatchUi.switchToView(tv, new WallStrikeStandingsDelegate(tv), WatchUi.SLIDE_LEFT);
+        hubActivateBand(st, 2);
         return true;
     }
 
