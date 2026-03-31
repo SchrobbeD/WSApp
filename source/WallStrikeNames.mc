@@ -113,6 +113,7 @@ class WallStrikeNamesDelegate extends WatchUi.BehaviorDelegate {
             return;
         }
         st.setupComplete = true;
+        st.startFitRecordingIfNeeded();
         WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_LEFT);
     }
 

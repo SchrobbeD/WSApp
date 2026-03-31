@@ -1,4 +1,7 @@
 import Toybox.Lang;
+import Toybox.Activity;
+import Toybox.ActivityRecording;
+import Toybox.System;
 
 //! Central session state for WallStrike / Muurkeklop.
 class WallStrikeState {
@@ -20,6 +23,8 @@ class WallStrikeState {
 
     var playerNames as Array<String>;
     var scores as Array<Number>;
+    var lastMatchPoints as Array<Number>;
+    var lastMatchOrderPoints as Array<Number>;
     var eliminated as Array<Number>;
 
     var activeTab as Number;
@@ -41,6 +46,18 @@ class WallStrikeState {
     var historyPrevLives as Array<Number>;
     var historyTop as Number;
 
+    //! Row display order for game list (contains player indices).
+    var playOrder as Array<Number>;
+
+    //! Shared FIT recording session for the whole app runtime.
+    var fitSession as ActivityRecording.Session?;
+    var fitPaused as Boolean = false;
+
+    //! Restart carry-over data between finished series and next setup cycle.
+    var restartPrefillNames as Array<String>;
+    var restartSeedOrder as Array<Number>;
+    var useRestartSeedOrder as Boolean = false;
+
     //! True when a round is active; false after finalization.
     var matchInProgress as Boolean = false;
 
@@ -61,6 +78,8 @@ class WallStrikeState {
         currentMatch = 1;
         playerNames = [] as Array<String>;
         scores = [] as Array<Number>;
+        lastMatchPoints = [] as Array<Number>;
+        lastMatchOrderPoints = [] as Array<Number>;
         eliminated = [] as Array<Number>;
         activeTab = 0;
         matchesPlayed = 0;
@@ -71,6 +90,12 @@ class WallStrikeState {
         historyPrevElim = [] as Array<Number>;
         historyPrevLives = [] as Array<Number>;
         historyTop = 0;
+        playOrder = [] as Array<Number>;
+        fitSession = null;
+        fitPaused = false;
+        restartPrefillNames = [] as Array<String>;
+        restartSeedOrder = [] as Array<Number>;
+        useRestartSeedOrder = false;
         matchInProgress = false;
         hubBandFocus = 0;
         bootBandFocus = 0;
@@ -81,12 +106,21 @@ class WallStrikeState {
     function resetGameArrays() as Void {
         playerNames = [] as Array<String>;
         scores = [] as Array<Number>;
+        lastMatchPoints = [] as Array<Number>;
+        lastMatchOrderPoints = [] as Array<Number>;
         eliminated = [] as Array<Number>;
         for (var i = 0; i < playerCount; i++) {
-            playerNames.add("P" + (i + 1));
+            if (i < restartPrefillNames.size()) {
+                playerNames.add(restartPrefillNames[i]);
+            } else {
+                playerNames.add("P" + (i + 1));
+            }
             scores.add(0);
+            lastMatchPoints.add(0);
+            lastMatchOrderPoints.add(0);
             eliminated.add(0);
         }
+        initializeFirstGameOrder();
         startMatchRound();
     }
 
@@ -118,6 +152,191 @@ class WallStrikeState {
         if (gameRowFocus >= playerCount) {
             gameRowFocus = 0;
         }
+    }
+
+    function ensurePlayOrder() as Void {
+        if (playOrder.size() == playerCount) {
+            return;
+        }
+        playOrder = [] as Array<Number>;
+        for (var i = 0; i < playerCount; i++) {
+            playOrder.add(i);
+        }
+    }
+
+    function randomizeFirstOrder() as Void {
+        ensurePlayOrder();
+        if (playOrder.size() <= 1) {
+            return;
+        }
+        var seed = System.getTimer();
+        var i = playOrder.size() - 1;
+        while (i > 0) {
+            // Keep j safely within [0..i] to avoid OOB on platforms where modulo can be negative.
+            seed = seed + (i * 37) + 17;
+            var j = seed % (i + 1);
+            if (j < 0) {
+                j = j + (i + 1);
+            }
+            var tmp = playOrder[i];
+            playOrder[i] = playOrder[j];
+            playOrder[j] = tmp;
+            i--;
+        }
+    }
+
+    function applyRestartSeedOrder() as Void {
+        if (restartSeedOrder.size() != playerCount) {
+            randomizeFirstOrder();
+            return;
+        }
+        playOrder = [] as Array<Number>;
+        for (var i = 0; i < restartSeedOrder.size(); i++) {
+            playOrder.add(restartSeedOrder[i]);
+        }
+    }
+
+    function initializeFirstGameOrder() as Void {
+        if (useRestartSeedOrder) {
+            applyRestartSeedOrder();
+            useRestartSeedOrder = false;
+        } else {
+            randomizeFirstOrder();
+        }
+    }
+
+    function rankOrderFromScores() as Array<Number> {
+        return rankOrderFromVector(scores);
+    }
+
+    function rankOrderFromVector(points as Array<Number>) as Array<Number> {
+        var order = [] as Array<Number>;
+        // Preserve current play order as stable tie-break basis.
+        if (playOrder.size() == playerCount) {
+            for (var p = 0; p < playOrder.size(); p++) {
+                order.add(playOrder[p]);
+            }
+        } else {
+            for (var i = 0; i < playerCount; i++) {
+                order.add(i);
+            }
+        }
+        var a = 0;
+        for (a = 0; a < order.size(); a++) {
+            var best = a;
+            var b = a + 1;
+            while (b < order.size()) {
+                var idxBest = order[best];
+                var idxB = order[b];
+                if (points[idxB] > points[idxBest]) {
+                    best = b;
+                }
+                b++;
+            }
+            if (best != a) {
+                var tmp = order[a];
+                order[a] = order[best];
+                order[best] = tmp;
+            }
+        }
+        return order;
+    }
+
+    function splitPlayOrderForLives(index as Number, keepIndexActive as Boolean) as Array<Array<Number>> {
+        var active = [] as Array<Number>;
+        var out = [] as Array<Number>;
+        ensurePlayOrder();
+        for (var i = 0; i < playOrder.size(); i++) {
+            var p = playOrder[i];
+            if (keepIndexActive && p == index) {
+                active.add(p);
+                continue;
+            }
+            if (eliminated[p] != 0 || lives[p] <= 0) {
+                out.add(p);
+            } else {
+                active.add(p);
+            }
+        }
+        return [active, out];
+    }
+
+    function reorderForLivesLifeEvent(index as Number, eliminatedNow as Boolean) as Void {
+        var split = splitPlayOrderForLives(index, eliminatedNow);
+        var active = split[0];
+        var out = split[1];
+        var pos = -1;
+        for (var i = 0; i < active.size(); i++) {
+            if (active[i] == index) {
+                pos = i;
+                break;
+            }
+        }
+        if (pos < 0) {
+            return;
+        }
+
+        var hasPrev = active.size() > 1;
+        var prev = index;
+        if (hasPrev) {
+            prev = active[(pos - 1 + active.size()) % active.size()];
+        }
+
+        var newActive = [] as Array<Number>;
+        if (!eliminatedNow) {
+            // Life lost: loser starts, player in front second, others unchanged.
+            newActive.add(index);
+            if (hasPrev) {
+                newActive.add(prev);
+            }
+            // Add remaining active players in circular order after the loser.
+            var j = (pos + 1) % active.size();
+            while (j != pos) {
+                var p = active[j];
+                if (p != prev) {
+                    newActive.add(p);
+                }
+                j = (j + 1) % active.size();
+            }
+            playOrder = [] as Array<Number>;
+            for (var a = 0; a < newActive.size(); a++) {
+                playOrder.add(newActive[a]);
+            }
+            for (var b = 0; b < out.size(); b++) {
+                playOrder.add(out[b]);
+            }
+            return;
+        }
+
+        // Eliminated: player in front starts; eliminated player moves to eliminated block.
+        if (hasPrev) {
+            newActive.add(prev);
+        }
+        // Add remaining active players in circular order after eliminated player.
+        var k = (pos + 1) % active.size();
+        while (k != pos) {
+            var q = active[k];
+            if (q != prev) {
+                newActive.add(q);
+            }
+            k = (k + 1) % active.size();
+        }
+        playOrder = [] as Array<Number>;
+        for (var c = 0; c < newActive.size(); c++) {
+            playOrder.add(newActive[c]);
+        }
+        playOrder.add(index);
+        for (var d = 0; d < out.size(); d++) {
+            playOrder.add(out[d]);
+        }
+    }
+
+    function reorderForNextRoundByScores() as Void {
+        if (systemId != 0 && systemId != 1) {
+            return;
+        }
+        // Between games, ordering follows previous-game result (winner first).
+        playOrder = rankOrderFromVector(lastMatchOrderPoints);
     }
 
     function isXDownAllowed() as Boolean {
@@ -199,6 +418,9 @@ class WallStrikeState {
             if (lives[index] <= 0 && eliminated[index] == 0) {
                 eliminated[index] = 1;
                 eliminationOrder.add(index);
+                reorderForLivesLifeEvent(index, true);
+            } else {
+                reorderForLivesLifeEvent(index, false);
             }
             return;
         }
@@ -318,6 +540,12 @@ class WallStrikeState {
     }
 
     function applyMatchScoringBySystem() as Void {
+        var matchPoints = [] as Array<Number>;
+        var orderPoints = [] as Array<Number>;
+        for (var m = 0; m < playerCount; m++) {
+            matchPoints.add(0);
+            orderPoints.add(0);
+        }
         var ranking = finalizeRankingOrder();
         var n = ranking.size();
         if (n <= 0) {
@@ -337,8 +565,97 @@ class WallStrikeState {
                 pts = place;
             }
             scores[idx] = scores[idx] + pts;
+            matchPoints[idx] = pts;
+            orderPoints[idx] = place;
         }
+        lastMatchPoints = matchPoints;
+        lastMatchOrderPoints = orderPoints;
         matchInProgress = false;
+    }
+
+    function isFitRecording() as Boolean {
+        if (fitSession == null) {
+            return false;
+        }
+        return fitSession.isRecording();
+    }
+
+    function isFitPaused() as Boolean {
+        return fitSession != null && fitPaused;
+    }
+
+    function startFitRecordingIfNeeded() as Void {
+        if ((Toybox has :ActivityRecording) == false) {
+            return;
+        }
+        if (fitSession != null) {
+            if (fitPaused) {
+                fitSession.start();
+                fitPaused = false;
+            }
+            return;
+        }
+        fitSession = ActivityRecording.createSession({
+            :name => "WallStrike",
+            :sport => Activity.SPORT_GENERIC,
+        });
+        fitSession.start();
+        fitPaused = false;
+    }
+
+    function pauseFitRecordingIfNeeded() as Void {
+        if (fitSession == null) {
+            return;
+        }
+        if (fitSession.isRecording()) {
+            fitSession.stop();
+            fitPaused = true;
+        }
+    }
+
+    function resumeFitRecordingIfPaused() as Void {
+        if (fitSession == null || !fitPaused) {
+            return;
+        }
+        fitSession.start();
+        fitPaused = false;
+    }
+
+    function toggleFitPauseResume() as Void {
+        if (fitSession == null) {
+            startFitRecordingIfNeeded();
+            return;
+        }
+        if (fitPaused) {
+            resumeFitRecordingIfPaused();
+        } else {
+            pauseFitRecordingIfNeeded();
+        }
+    }
+
+    function stopFitRecordingIfNeeded() as Void {
+        if (fitSession == null) {
+            return;
+        }
+        if (fitSession.isRecording()) {
+            fitSession.stop();
+        }
+        fitSession.save();
+        fitSession = null;
+        fitPaused = false;
+    }
+
+    function prepareRestartWithSamePlayers() as Void {
+        restartPrefillNames = [] as Array<String>;
+        for (var i = 0; i < playerNames.size(); i++) {
+            restartPrefillNames.add(playerNames[i]);
+        }
+        restartSeedOrder = rankOrderFromScores();
+        useRestartSeedOrder = true;
+        setupComplete = false;
+        wizardStep = 0;
+        matchesPlayed = 0;
+        gameRowFocus = 0;
     }
 
     function systemNeedsMatchCount() as Boolean {

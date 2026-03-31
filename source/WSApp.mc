@@ -18,12 +18,11 @@ class WSApp extends Application.AppBase {
 
     function getInitialView() as [Views] or [Views, InputDelegates] {
         var st = wallState;
-        if (st.setupComplete) {
-            return [new WallStrikeHubView(), new WallStrikeHubDelegate()];
-        }
-        if (!st.bootDone) {
-            return [new WallStrikeBootView(), new WallStrikeBootDelegate()];
-        }
-        return [new WallStrikeWizardView(), new WallStrikeWizardDelegate()];
+        st.startFitRecordingIfNeeded();
+        return [new WallStrikeHubView(), new WallStrikeHubDelegate()];
+    }
+
+    function onStop(state as Dictionary or Null) as Void {
+        wallState.stopFitRecordingIfNeeded();
     }
 }

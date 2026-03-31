@@ -132,8 +132,16 @@ class WallStrikeHubDelegate extends WatchUi.BehaviorDelegate {
             return;
         }
         if (band == 1) {
+            if (!st.setupComplete) {
+                WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_LEFT);
+                return;
+            }
             var gv = new WallStrikeGameView();
             WatchUi.switchToView(gv, new WallStrikeGameDelegate(gv), WatchUi.SLIDE_LEFT);
+            return;
+        }
+        if (!st.setupComplete) {
+            WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_LEFT);
             return;
         }
         var tv = new WallStrikeStandingsView();

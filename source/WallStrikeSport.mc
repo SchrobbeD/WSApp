@@ -1,8 +1,6 @@
 import Toybox.Activity;
-import Toybox.ActivityRecording;
 import Toybox.Graphics;
 import Toybox.Lang;
-import Toybox.SensorHistory;
 import Toybox.System;
 import Toybox.Timer;
 import Toybox.UserProfile;
@@ -10,12 +8,10 @@ import Toybox.WatchUi;
 
 class WallStrikeSportView extends WatchUi.View {
 
-    var _session as ActivityRecording.Session?;
     var _tick as Timer.Timer?;
 
     function initialize() {
         View.initialize();
-        _session = null;
         _tick = null;
     }
 
@@ -38,28 +34,11 @@ class WallStrikeSportView extends WatchUi.View {
     }
 
     function isRecording() as Boolean {
-        if (_session != null) {
-            return _session.isRecording();
-        }
-        return false;
+        return appWallState().isFitRecording();
     }
 
-    function toggleRecording() as Void {
-        if ((Toybox has :ActivityRecording) == false) {
-            return;
-        }
-        if (!isRecording()) {
-            _session = ActivityRecording.createSession({
-                :name => "WallStrike",
-                :sport => Activity.SPORT_GENERIC,
-            });
-            _session.start();
-        } else if (_session != null) {
-            _session.stop();
-            _session.save();
-            _session = null;
-        }
-        WatchUi.requestUpdate();
+    function isPaused() as Boolean {
+        return appWallState().isFitPaused();
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
@@ -68,12 +47,13 @@ class WallStrikeSportView extends WatchUi.View {
         var w = dc.getWidth();
         var h = dc.getHeight();
         var mid = w / 2;
-        var footH = 46;
+        var footH = 52;
         var footTop = h - footH;
         var fhXt = dc.getFontHeight(Graphics.FONT_XTINY);
         var fhMd = dc.getFontHeight(Graphics.FONT_MEDIUM);
-        var sparkH = 32;
-        var blockH = fhXt + 4 + fhMd + 2 + fhXt + 2 + fhXt + 8 + sparkH;
+        var fhSm = dc.getFontHeight(Graphics.FONT_SMALL);
+        var zoneH = 12;
+        var blockH = zoneH + 6 + fhMd + 2 + fhSm + 2 + fhXt + 2 + fhXt;
         var contentTop = (footTop - wsTopSafe() - blockH) / 2 + wsTopSafe();
         if (contentTop < wsTopSafe()) {
             contentTop = wsTopSafe();
@@ -97,17 +77,19 @@ class WallStrikeSportView extends WatchUi.View {
             }
         }
 
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         var y = contentTop;
-        dc.drawText(mid, y, Graphics.FONT_XTINY, "Sport", Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhXt + 4;
-        dc.drawText(mid, y, Graphics.FONT_MEDIUM, timeStr, Graphics.TEXT_JUSTIFY_CENTER);
+        drawZoneBar(dc, y, w - 24, zoneStr);
+        y += zoneH + 6;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(mid, y, Graphics.FONT_MEDIUM, "HR " + hrStr, Graphics.TEXT_JUSTIFY_CENTER);
         y += fhMd + 2;
-        dc.drawText(mid, y, Graphics.FONT_XTINY, "HR " + hrStr + "  Z" + zoneStr, Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhXt + 2;
+        dc.drawText(mid, y, Graphics.FONT_SMALL, "Zone " + zoneStr, Graphics.TEXT_JUSTIFY_CENTER);
+        y += fhSm + 2;
         dc.drawText(mid, y, Graphics.FONT_XTINY, "kcal " + calStr, Graphics.TEXT_JUSTIFY_CENTER);
+        y += fhXt + 2;
+        dc.drawText(mid, y, Graphics.FONT_XTINY, "Timer " + timeStr, Graphics.TEXT_JUSTIFY_CENTER);
         y += fhXt + 8;
-        drawHrSparkline(dc, y, w - 20, sparkH);
+        dc.drawText(mid, y, Graphics.FONT_XTINY, "Time " + formatClock(), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawLine(4, footTop, w - 4, footTop);
@@ -115,19 +97,17 @@ class WallStrikeSportView extends WatchUi.View {
         dc.drawLine(w - 4, footTop, w - 4, h - 4);
         dc.drawLine(4, h - 4, w - 4, h - 4);
 
-        var menuLine = "MENU: start FIT";
-        if (isRecording()) {
-            menuLine = "MENU: stop & save";
+        var menuLine = "Activity tracked";
+        if (isPaused()) {
+            menuLine = "Activity paused";
         }
-        var fy = footTop + (footH - 2 * fhXt - 4) / 2;
-        if (isRecording()) {
+        var fy = footTop + 4;
+        if (!isPaused()) {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
         } else {
             dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
         }
         dc.drawText(mid, fy, Graphics.FONT_XTINY, menuLine, Graphics.TEXT_JUSTIFY_CENTER);
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(mid, fy + fhXt + 2, Graphics.FONT_XTINY, "BACK: hub", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function formatMs(ms as Number) as String {
@@ -139,6 +119,19 @@ class WallStrikeSportView extends WatchUi.View {
             pad = "0";
         }
         return m + ":" + pad + s;
+    }
+
+    function formatClock() as String {
+        var now = System.getClockTime();
+        var h = now.hour;
+        var m = now.min;
+        var mm = "";
+        if (m < 10) {
+            mm = "0" + m;
+        } else {
+            mm = m.toString();
+        }
+        return h + ":" + mm;
     }
 
     function zoneLabel(hr as Number) as String {
@@ -158,49 +151,35 @@ class WallStrikeSportView extends WatchUi.View {
         return z.size().toString();
     }
 
-    function drawHrSparkline(dc as Graphics.Dc, yTop as Number, barW as Number, barH as Number) as Void {
-        var x0 = 10;
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawRectangle(x0, yTop, barW, barH);
-        var it = SensorHistory.getHeartRateHistory({:period => 120, :order => SensorHistory.ORDER_OLDEST_FIRST});
-        var samples = [] as Array<Number>;
-        var s = it.next();
-        while (s != null) {
-            if (s.data != null) {
-                samples.add(s.data.toNumber());
+    function drawZoneBar(dc as Graphics.Dc, yTop as Number, barW as Number, zoneStr as String) as Void {
+        var x0 = (dc.getWidth() - barW) / 2;
+        var zone = 1;
+        if (zoneStr != "?" && zoneStr != "-") {
+            var parsed = zoneStr.toNumber();
+            if (parsed != null) {
+                zone = parsed;
             }
-            s = it.next();
         }
-        var n = samples.size();
-        if (n < 2) {
-            return;
-        }
-        var minHr = 50;
-        var maxHr = 180;
-        var span = maxHr - minHr;
-        if (span <= 0) {
-            span = 1;
-        }
+        var segmentW = barW / 5;
         var i = 0;
-        dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-        for (i = 1; i < n; i++) {
-            var xa = x0 + (i - 1) * (barW - 1) / (n - 1);
-            var xb = x0 + i * (barW - 1) / (n - 1);
-            var ha = barH - 1 - ((samples[i - 1] - minHr) * (barH - 2) / span);
-            var hb = barH - 1 - ((samples[i] - minHr) * (barH - 2) / span);
-            if (ha < 0) {
-                ha = 0;
-            }
-            if (hb < 0) {
-                hb = 0;
-            }
-            if (ha > barH - 1) {
-                ha = barH - 1;
-            }
-            if (hb > barH - 1) {
-                hb = barH - 1;
-            }
-            dc.drawLine(xa, yTop + ha, xb, yTop + hb);
+        for (i = 0; i < 5; i++) {
+            var c = Graphics.COLOR_DK_GRAY;
+            if (i == 0) { c = Graphics.COLOR_BLUE; }
+            if (i == 1) { c = Graphics.COLOR_LT_GRAY; }
+            if (i == 2) { c = Graphics.COLOR_GREEN; }
+            if (i == 3) { c = Graphics.COLOR_YELLOW; }
+            if (i == 4) { c = Graphics.COLOR_RED; }
+            dc.setColor(c, Graphics.COLOR_TRANSPARENT);
+            dc.drawLine(x0 + i * segmentW, yTop, x0 + (i + 1) * segmentW - 2, yTop);
+            dc.drawLine(x0 + i * segmentW, yTop + 1, x0 + (i + 1) * segmentW - 2, yTop + 1);
+            dc.drawLine(x0 + i * segmentW, yTop + 2, x0 + (i + 1) * segmentW - 2, yTop + 2);
+            dc.drawLine(x0 + i * segmentW, yTop + 3, x0 + (i + 1) * segmentW - 2, yTop + 3);
+        }
+        if (zone >= 1 && zone <= 5) {
+            var zx = x0 + (zone - 1) * segmentW + segmentW / 2;
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawLine(zx - 2, yTop + 6, zx + 2, yTop + 6);
+            dc.drawLine(zx - 1, yTop + 7, zx + 1, yTop + 7);
         }
     }
 }
@@ -215,7 +194,14 @@ class WallStrikeSportDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onMenu() as Boolean {
-        _view.toggleRecording();
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onSelect() as Boolean {
+        var st = appWallState();
+        st.toggleFitPauseResume();
+        WatchUi.requestUpdate();
         return true;
     }
 

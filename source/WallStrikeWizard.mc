@@ -175,6 +175,12 @@ class WallStrikeWizardDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
+    function onBack() as Boolean {
+        // Prevent app exit when backing out of setup.
+        WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
+        return true;
+    }
+
     function onTap(clickEvent as WatchUi.ClickEvent) as Boolean {
         var xy = clickEvent.getCoordinates();
         var y = xy[1];
