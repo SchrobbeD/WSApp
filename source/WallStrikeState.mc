@@ -25,6 +25,8 @@ class WallStrikeState {
     var scores as Array<Number>;
     var lastMatchPoints as Array<Number>;
     var lastMatchOrderPoints as Array<Number>;
+    var plannedScores as Array<Number>;
+    var extraGamesRequested as Number;
     var eliminated as Array<Number>;
 
     var activeTab as Number;
@@ -80,6 +82,8 @@ class WallStrikeState {
         scores = [] as Array<Number>;
         lastMatchPoints = [] as Array<Number>;
         lastMatchOrderPoints = [] as Array<Number>;
+        plannedScores = [] as Array<Number>;
+        extraGamesRequested = 0;
         eliminated = [] as Array<Number>;
         activeTab = 0;
         matchesPlayed = 0;
@@ -108,6 +112,8 @@ class WallStrikeState {
         scores = [] as Array<Number>;
         lastMatchPoints = [] as Array<Number>;
         lastMatchOrderPoints = [] as Array<Number>;
+        plannedScores = [] as Array<Number>;
+        extraGamesRequested = 0;
         eliminated = [] as Array<Number>;
         for (var i = 0; i < playerCount; i++) {
             if (i < restartPrefillNames.size()) {
@@ -122,6 +128,33 @@ class WallStrikeState {
         }
         initializeFirstGameOrder();
         startMatchRound();
+    }
+
+    function maxGamesAllowed() as Number {
+        return matchTotal + extraGamesRequested;
+    }
+
+    function hasFinishedAllGames() as Boolean {
+        return matchesPlayed >= maxGamesAllowed();
+    }
+
+    function requestOneExtraGame() as Void {
+        extraGamesRequested++;
+        startMatchRound();
+        gameRowFocus = 0;
+    }
+
+    function capturePlannedScoresIfNeeded() as Void {
+        if (plannedScores.size() != 0) {
+            return;
+        }
+        if (matchesPlayed < matchTotal) {
+            return;
+        }
+        plannedScores = [] as Array<Number>;
+        for (var i = 0; i < scores.size(); i++) {
+            plannedScores.add(scores[i]);
+        }
     }
 
     function clearEliminationsForNewMatch() as Void {
@@ -645,6 +678,17 @@ class WallStrikeState {
         fitPaused = false;
     }
 
+    function discardFitRecordingIfNeeded() as Void {
+        if (fitSession == null) {
+            return;
+        }
+        if (fitSession.isRecording()) {
+            fitSession.stop();
+        }
+        fitSession = null;
+        fitPaused = false;
+    }
+
     function prepareRestartWithSamePlayers() as Void {
         restartPrefillNames = [] as Array<String>;
         for (var i = 0; i < playerNames.size(); i++) {
@@ -656,6 +700,41 @@ class WallStrikeState {
         wizardStep = 0;
         matchesPlayed = 0;
         gameRowFocus = 0;
+    }
+
+    function resetForFreshSetupKeepNames() as Void {
+        restartPrefillNames = [] as Array<String>;
+        for (var i = 0; i < playerNames.size(); i++) {
+            restartPrefillNames.add(playerNames[i]);
+        }
+        restartSeedOrder = [] as Array<Number>;
+        useRestartSeedOrder = false;
+
+        // Reset full setup/runtime defaults except names prefill.
+        setupComplete = false;
+        wizardStep = 0;
+        systemId = 0;
+        matchTotal = 8;
+        livesSetting = 3;
+        matchesPlayed = 0;
+        gameRowFocus = 0;
+        hubBandFocus = 0;
+        plannedScores = [] as Array<Number>;
+        extraGamesRequested = 0;
+
+        // Clear current runtime arrays so old series data cannot leak.
+        scores = [] as Array<Number>;
+        lastMatchPoints = [] as Array<Number>;
+        lastMatchOrderPoints = [] as Array<Number>;
+        eliminated = [] as Array<Number>;
+        eliminationOrder = [] as Array<Number>;
+        historyIndex = [] as Array<Number>;
+        historyPrevElim = [] as Array<Number>;
+        historyPrevLives = [] as Array<Number>;
+        historyTop = 0;
+        playOrder = [] as Array<Number>;
+        lives = [] as Array<Number>;
+        matchInProgress = false;
     }
 
     function systemNeedsMatchCount() as Boolean {

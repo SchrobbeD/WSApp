@@ -111,10 +111,13 @@ class WallStrikeGameView extends WatchUi.View {
         var playBottom = listTop + rowCount * rowH;
         var footTop = h - footH;
         var gameNo = st.matchesPlayed + 1;
-        if (gameNo > st.matchTotal) {
-            gameNo = st.matchTotal;
+        if (st.hasFinishedAllGames()) {
+            gameNo = st.maxGamesAllowed();
         }
         var gameTitle = "Game " + gameNo + "/" + st.matchTotal;
+        if (st.systemId == 2) {
+            gameTitle = "Game";
+        }
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(mid, 8, Graphics.FONT_SMALL, gameTitle, Graphics.TEXT_JUSTIFY_CENTER);
@@ -123,14 +126,14 @@ class WallStrikeGameView extends WatchUi.View {
         var right = wsListRightX(dc);
         dc.drawLine(left, topY, right, topY);
 
-        if (st.matchesPlayed >= st.matchTotal) {
+        if (st.hasFinishedAllGames()) {
             var msgH = dc.getFontHeight(Graphics.FONT_XTINY) * 3 + 12;
             var cy = (h - msgH) / 2;
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             dc.drawText(mid, cy, Graphics.FONT_XTINY, "All matches done", Graphics.TEXT_JUSTIFY_CENTER);
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(mid, cy + dc.getFontHeight(Graphics.FONT_XTINY) + 6, Graphics.FONT_XTINY, "MENU: restart same players", Graphics.TEXT_JUSTIFY_CENTER);
-            dc.drawText(mid, cy + 2 * dc.getFontHeight(Graphics.FONT_XTINY) + 10, Graphics.FONT_XTINY, "BACK: hub", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(mid, cy + 2 * dc.getFontHeight(Graphics.FONT_XTINY) + 10, Graphics.FONT_XTINY, "START: add a game", Graphics.TEXT_JUSTIFY_CENTER);
             return;
         }
 
@@ -149,13 +152,38 @@ class WallStrikeGameView extends WatchUi.View {
             var pIdx = gameRowToPlayerIndex(st, i);
             var label = st.playerNames[pIdx];
             if (st.systemId == 2) {
-                label = label + " (" + st.lives[pIdx] + "L)";
+                if (st.lives[pIdx] > 0) {
+                    label = label + " (" + st.lives[pIdx] + ")";
+                }
             }
             if (st.eliminated[pIdx] != 0 || (st.systemId == 2 && st.lives[pIdx] <= 0)) {
                 label = label + " [OUT]";
             }
             var c = Graphics.COLOR_LT_GRAY;
-            if (st.eliminated[pIdx] != 0 || (st.systemId == 2 && st.lives[pIdx] <= 0)) {
+            if (st.systemId == 2) {
+                // Lives mode: gradually shift from white to dark red as lives drop.
+                var life = st.lives[pIdx];
+                if (life <= 0 || st.eliminated[pIdx] != 0) {
+                    c = Graphics.COLOR_DK_RED;
+                } else {
+                    var maxLife = st.livesSetting;
+                    if (maxLife <= 0) {
+                        maxLife = 1;
+                    }
+                    var pct = (life * 100) / maxLife;
+                    if (pct >= 80) {
+                        c = Graphics.COLOR_WHITE;
+                    } else if (pct >= 60) {
+                        c = Graphics.COLOR_LT_GRAY;
+                    } else if (pct >= 40) {
+                        c = Graphics.COLOR_YELLOW;
+                    } else if (pct >= 20) {
+                        c = Graphics.COLOR_ORANGE;
+                    } else {
+                        c = Graphics.COLOR_RED;
+                    }
+                }
+            } else if (st.eliminated[pIdx] != 0) {
                 c = Graphics.COLOR_DK_RED;
             }
             dc.setColor(c, Graphics.COLOR_TRANSPARENT);
@@ -206,7 +234,7 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function restartFinishedSeries(st as WallStrikeState) as Void {
-        st.prepareRestartWithSamePlayers();
+        st.resetForFreshSetupKeepNames();
         st.namesRowFocus = 0;
         WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_RIGHT);
     }
@@ -218,8 +246,7 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
             WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
             return true;
         }
-        if (st.matchesPlayed >= st.matchTotal) {
-            restartFinishedSeries(st);
+        if (st.hasFinishedAllGames()) {
             return true;
         }
         var xy = clickEvent.getCoordinates();
@@ -257,9 +284,11 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
             st.gameRowFocus = idx;
             st.applyMatchScoringBySystem();
             st.matchesPlayed++;
+            st.capturePlannedScoresIfNeeded();
             st.reorderForNextRoundByScores();
             st.startMatchRound();
-            WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
+            st.gameRowFocus = 0;
+            WatchUi.requestUpdate();
             return true;
         }
         if (idx >= st.playerCount) {
@@ -278,7 +307,7 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
         var st = appWallState();
         st.ensurePlayOrder();
         var rowCount = gameRowCount(st);
-        if (st.sportOnlyMode || st.matchesPlayed >= st.matchTotal || rowCount <= 0) {
+        if (st.sportOnlyMode || st.hasFinishedAllGames() || rowCount <= 0) {
             return true;
         }
         st.gameRowFocus--;
@@ -293,7 +322,7 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
         var st = appWallState();
         st.ensurePlayOrder();
         var rowCount = gameRowCount(st);
-        if (st.sportOnlyMode || st.matchesPlayed >= st.matchTotal || rowCount <= 0) {
+        if (st.sportOnlyMode || st.hasFinishedAllGames() || rowCount <= 0) {
             return true;
         }
         st.gameRowFocus++;
@@ -307,9 +336,10 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
     function onSelect() as Boolean {
         var st = appWallState();
         st.ensurePlayOrder();
-        if (st.sportOnlyMode || st.matchesPlayed >= st.matchTotal || st.playerCount <= 0) {
-            if (st.matchesPlayed >= st.matchTotal) {
-                restartFinishedSeries(st);
+        if (st.sportOnlyMode || st.hasFinishedAllGames() || st.playerCount <= 0) {
+            if (st.hasFinishedAllGames()) {
+                st.requestOneExtraGame();
+                WatchUi.requestUpdate();
             }
             return true;
         }
@@ -329,9 +359,11 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
         if (st.gameRowFocus == nextRow) {
             st.applyMatchScoringBySystem();
             st.matchesPlayed++;
+            st.capturePlannedScoresIfNeeded();
             st.reorderForNextRoundByScores();
             st.startMatchRound();
-            WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
+            st.gameRowFocus = 0;
+            WatchUi.requestUpdate();
             return true;
         }
         var pIdx = gameRowToPlayerIndex(st, st.gameRowFocus);
@@ -349,8 +381,7 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
             WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
             return true;
         }
-        st.setupComplete = false;
-        st.wizardStep = 0;
+        st.resetForFreshSetupKeepNames();
         WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_RIGHT);
         return true;
     }

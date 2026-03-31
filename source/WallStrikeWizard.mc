@@ -176,7 +176,9 @@ class WallStrikeWizardDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onBack() as Boolean {
-        // Prevent app exit when backing out of setup.
+        // Cancel current setup flow and restart wizard from Players next time.
+        var st = appWallState();
+        st.wizardStep = 0;
         WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
         return true;
     }

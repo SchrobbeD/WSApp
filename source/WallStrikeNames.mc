@@ -145,6 +145,14 @@ class WallStrikeNamesDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
+    function onBack() as Boolean {
+        // Treat names input as part of setup wizard flow.
+        var st = appWallState();
+        st.wizardStep = 0;
+        WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
+        return true;
+    }
+
     function onTap(clickEvent as WatchUi.ClickEvent) as Boolean {
         var st = appWallState();
         var y = clickEvent.getCoordinates()[1];

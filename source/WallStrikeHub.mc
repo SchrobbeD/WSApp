@@ -199,6 +199,12 @@ class WallStrikeHubDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onBack() as Boolean {
+        var st = appWallState();
+        if (st.fitSession != null) {
+            st.gameRowFocus = 0;
+            WatchUi.pushView(new WallStrikeExitConfirmView(), new WallStrikeExitConfirmDelegate(), WatchUi.SLIDE_UP);
+            return true;
+        }
         return false;
     }
 }
