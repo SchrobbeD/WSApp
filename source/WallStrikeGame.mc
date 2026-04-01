@@ -284,6 +284,9 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
             st.gameRowFocus = idx;
             st.applyMatchScoringBySystem();
             st.matchesPlayed++;
+            if (st.matchesPlayed == st.matchTotal) {
+                st.incrementGamesForCurrentPlayers();
+            }
             st.capturePlannedScoresIfNeeded();
             st.reorderForNextRoundByScores();
             st.startMatchRound();
@@ -359,6 +362,9 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
         if (st.gameRowFocus == nextRow) {
             st.applyMatchScoringBySystem();
             st.matchesPlayed++;
+            if (st.matchesPlayed == st.matchTotal) {
+                st.incrementGamesForCurrentPlayers();
+            }
             st.capturePlannedScoresIfNeeded();
             st.reorderForNextRoundByScores();
             st.startMatchRound();

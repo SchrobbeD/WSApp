@@ -103,13 +103,8 @@ class WallStrikeNamesDelegate extends WatchUi.BehaviorDelegate {
 
     function namesActivateIndex(st as WallStrikeState, idx as Number) as Void {
         if (idx < st.playerCount) {
-            if ((WatchUi has :TextPicker)) {
-                WatchUi.pushView(
-                    new WatchUi.TextPicker(st.playerNames[idx]),
-                    new WallStrikePickNameDelegate(idx),
-                    WatchUi.SLIDE_DOWN
-                );
-            }
+            var pv = new WallStrikeNamePickerSwipeView(idx);
+            WatchUi.pushView(pv, new WallStrikeNamePickerSwipeDelegate(pv), WatchUi.SLIDE_LEFT);
             return;
         }
         st.setupComplete = true;
@@ -186,15 +181,25 @@ class WallStrikeNamesDelegate extends WatchUi.BehaviorDelegate {
 class WallStrikePickNameDelegate extends WatchUi.TextPickerDelegate {
 
     var _index as Number;
+    var _returnToNames as Boolean;
 
-    function initialize(i as Number) {
+    function initialize(i as Number, returnToNames as Boolean) {
         TextPickerDelegate.initialize();
         _index = i;
+        _returnToNames = returnToNames;
     }
 
     function onTextEntered(text as String, changed as Boolean) as Boolean {
         var st = appWallState();
         st.playerNames[_index] = text;
+        st.addConfiguredNameIfMissing(text);
+        if (_returnToNames || st.returnToNamesAfterPicker) {
+            st.returnToNamesAfterPicker = false;
+            st.namesRowFocus = _index;
+            // TextPicker auto-dismisses on true; this explicit pop closes the underlying picker view.
+            WatchUi.popView(WatchUi.SLIDE_RIGHT);
+            return true;
+        }
         WatchUi.requestUpdate();
         return true;
     }

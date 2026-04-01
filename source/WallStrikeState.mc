@@ -1,6 +1,7 @@
 import Toybox.Lang;
 import Toybox.Activity;
 import Toybox.ActivityRecording;
+import Toybox.Application;
 import Toybox.System;
 
 //! Central session state for WallStrike / Muurkeklop.
@@ -68,6 +69,8 @@ class WallStrikeState {
     var bootBandFocus as Number = 0;
     var namesRowFocus as Number = 0;
     var gameRowFocus as Number = 0;
+    var returnToNamesAfterPicker as Boolean = false;
+    var returnToNamesIndex as Number = 0;
 
     function initialize() {
         wizardStep = 0;
@@ -105,6 +108,8 @@ class WallStrikeState {
         bootBandFocus = 0;
         namesRowFocus = 0;
         gameRowFocus = 0;
+        returnToNamesAfterPicker = false;
+        returnToNamesIndex = 0;
     }
 
     function resetGameArrays() as Void {
@@ -685,6 +690,7 @@ class WallStrikeState {
         if (fitSession.isRecording()) {
             fitSession.stop();
         }
+        fitSession.discard();
         fitSession = null;
         fitPaused = false;
     }
@@ -739,6 +745,387 @@ class WallStrikeState {
 
     function systemNeedsMatchCount() as Boolean {
         return true;
+    }
+
+    function sanitizeNameEntry(raw as String) as String {
+        var s = raw;
+        s = trimStringSafe(s);
+        while (s.length() >= 2 && s.substring(0, 1) == "\"" && s.substring(s.length() - 1, s.length()) == "\"") {
+            s = s.substring(1, s.length() - 1);
+            s = trimStringSafe(s);
+        }
+        s = normalizeNameToken(s);
+        return trimStringSafe(s);
+    }
+
+    function trimStringSafe(s as String) as String {
+        if (s.length() == 0) {
+            return "";
+        }
+        var start = 0;
+        var stop = s.length();
+        while (start < stop) {
+            var c1 = s.substring(start, start + 1);
+            if (c1 != " " && c1 != "\t" && c1 != "\n" && c1 != "\r") {
+                break;
+            }
+            start++;
+        }
+        while (stop > start) {
+            var c2 = s.substring(stop - 1, stop);
+            if (c2 != " " && c2 != "\t" && c2 != "\n" && c2 != "\r") {
+                break;
+            }
+            stop--;
+        }
+        return s.substring(start, stop);
+    }
+
+    function strEq(a as String, b as String) as Boolean {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.length() != b.length()) {
+            return false;
+        }
+        return a.compareTo(b) == 0;
+    }
+
+    function isDigitChar(c as String) as Boolean {
+        if (c == null || c.length() == 0) {
+            return false;
+        }
+        return strEq(c, "0") || strEq(c, "1") || strEq(c, "2") || strEq(c, "3") || strEq(c, "4") || strEq(c, "5") || strEq(c, "6") || strEq(c, "7") || strEq(c, "8") || strEq(c, "9");
+    }
+
+    function isLetterChar(c as String) as Boolean {
+        if (c == null || c.length() == 0) {
+            return false;
+        }
+        var l = c.toLower();
+        return l.compareTo("a") >= 0 && l.compareTo("z") <= 0;
+    }
+
+    function isStrictWholeNumber(raw as String) as Boolean {
+        if (raw.length() == 0) {
+            return false;
+        }
+        var i = 0;
+        var first = raw.substring(0, 1);
+        if (strEq(first, "+") || strEq(first, "-")) {
+            if (raw.length() == 1) {
+                return false;
+            }
+            i = 1;
+        }
+        while (i < raw.length()) {
+            if (!isDigitChar(raw.substring(i, i + 1))) {
+                return false;
+            }
+            i++;
+        }
+        return true;
+    }
+
+    function parseWholeNumberStrict(raw as String) as Number? {
+        if (!isStrictWholeNumber(raw)) {
+            return null;
+        }
+        var sign = 1;
+        var i = 0;
+        if (raw.length() > 0) {
+            var first = raw.substring(0, 1);
+            if (strEq(first, "-")) {
+                sign = -1;
+                i = 1;
+            } else if (strEq(first, "+")) {
+                i = 1;
+            }
+        }
+        var v = 0;
+        while (i < raw.length()) {
+            var c = raw.substring(i, i + 1);
+            var d = 0;
+            if (strEq(c, "0")) { d = 0; }
+            else if (strEq(c, "1")) { d = 1; }
+            else if (strEq(c, "2")) { d = 2; }
+            else if (strEq(c, "3")) { d = 3; }
+            else if (strEq(c, "4")) { d = 4; }
+            else if (strEq(c, "5")) { d = 5; }
+            else if (strEq(c, "6")) { d = 6; }
+            else if (strEq(c, "7")) { d = 7; }
+            else if (strEq(c, "8")) { d = 8; }
+            else if (strEq(c, "9")) { d = 9; }
+            v = (v * 10) + d;
+            i++;
+        }
+        return v * sign;
+    }
+
+    function isAlphaNumChar(c as String) as Boolean {
+        return isDigitChar(c) || isLetterChar(c);
+    }
+
+    function normalizeNameToken(raw as String) as String {
+        var n = trimStringSafe(raw);
+        while (n.length() > 0) {
+            var first = n.substring(0, 1);
+            if (isAlphaNumChar(first)) {
+                break;
+            }
+            n = trimStringSafe(n.substring(1, n.length()));
+        }
+        while (n.length() > 0) {
+            var last = n.substring(n.length() - 1, n.length());
+            if (isAlphaNumChar(last)) {
+                break;
+            }
+            n = trimStringSafe(n.substring(0, n.length() - 1));
+        }
+        return n;
+    }
+
+    function canonicalName(raw as String) as String {
+        return sanitizeNameEntry(raw);
+    }
+
+    function buildPlayerStatsRaw(names as Array<Lang.Object>, counts as Array<Lang.Object>) as String {
+        var raw = "";
+        for (var i = 0; i < names.size() && i < counts.size(); i++) {
+            var n = canonicalName(names[i].toString());
+            var c = counts[i];
+            if (n.length() == 0) {
+                continue;
+            }
+            if (raw.length() > 0) {
+                raw = raw + ";";
+            }
+            raw = raw + n + ":" + c;
+        }
+        return raw;
+    }
+
+    function dedupeStats(names as Array<Lang.Object>, counts as Array<Lang.Object>) as Array<Array<Lang.Object>> {
+        var outNames = [] as Array<Lang.Object>;
+        var outCounts = [] as Array<Lang.Object>;
+        for (var i = 0; i < names.size() && i < counts.size(); i++) {
+            var n = canonicalName(names[i].toString());
+            if (n.length() == 0) {
+                continue;
+            }
+            var c = counts[i] as Number;
+            var key = n.toLower();
+            var idx = -1;
+            for (var k = 0; k < outNames.size(); k++) {
+                var existing = canonicalName(outNames[k].toString()).toLower();
+                if (strEq(existing, key)) {
+                    idx = k;
+                    break;
+                }
+            }
+            if (idx < 0) {
+                outNames.add(n);
+                outCounts.add(c);
+            } else if (c > (outCounts[idx] as Number)) {
+                // Keep the highest observed count when cleaning corrupted duplicates.
+                outCounts[idx] = c;
+            }
+        }
+        return [outNames, outCounts];
+    }
+
+    function loadLocalPlayerStats() as Array<Array<Lang.Object>> {
+        var names = [] as Array<Lang.Object>;
+        var counts = [] as Array<Lang.Object>;
+        var raw = "";
+        var defaultsRaw = "";
+        try {
+            var pDef = Application.Properties.getValue("playerStatsDefaults");
+            if (pDef != null) {
+                defaultsRaw = pDef.toString();
+            }
+        } catch (eDef) {
+            defaultsRaw = "";
+        }
+        try {
+            var p = Application.Properties.getValue("playerStats");
+            if (p != null) {
+                raw = p.toString();
+            }
+        } catch (e) {
+            raw = "";
+        }
+        // If no runtime list exists yet, seed from defaults.
+        if (raw.length() == 0 && defaultsRaw.length() > 0) {
+            raw = defaultsRaw;
+        }
+        var parsedItems = 0;
+        var i = 0;
+        while (i <= raw.length()) {
+            var entryStart = i;
+            while (i < raw.length() && !strEq(raw.substring(i, i + 1), ";")) {
+                i++;
+            }
+            var entry = trimStringSafe(raw.substring(entryStart, i));
+            if (i < raw.length()) {
+                i++; // skip ';'
+            } else {
+                i = i + 1; // end loop
+            }
+            if (entry.length() == 0) {
+                continue;
+            }
+
+            var sep = -1;
+            var j = entry.length() - 1;
+            while (j >= 0) {
+                if (strEq(entry.substring(j, j + 1), ":")) {
+                    sep = j;
+                    break;
+                }
+                j--;
+            }
+            if (sep <= 0 || sep >= entry.length() - 1) {
+                continue;
+            }
+
+            var n = canonicalName(entry.substring(0, sep));
+            var cRaw = trimStringSafe(entry.substring(sep + 1, entry.length()));
+            var cNum = parseWholeNumberStrict(cRaw);
+            if (n.length() == 0 || cRaw.length() == 0 || cNum == null) {
+                continue;
+            }
+            var c = 0;
+            c = cNum;
+            if (n.length() > 0) {
+                names.add(n);
+                counts.add(c);
+                parsedItems++;
+            }
+        }
+        var deduped = dedupeStats(names, counts);
+        names = deduped[0];
+        counts = deduped[1];
+        var canonicalRaw = buildPlayerStatsRaw(names, counts);
+        if (raw.compareTo(canonicalRaw) != 0) {
+            saveLocalPlayerStats(names, counts);
+        }
+        return [names, counts];
+    }
+
+    function saveLocalPlayerStats(names as Array<Lang.Object>, counts as Array<Lang.Object>) as Void {
+        var deduped = dedupeStats(names, counts);
+        names = deduped[0];
+        counts = deduped[1];
+        var raw = buildPlayerStatsRaw(names, counts);
+        try {
+            Application.Properties.setValue("playerStats", raw);
+        } catch (e) {
+        }
+    }
+
+    function findKnownPlayerIndex(names as Array<Lang.Object>, name as String) as Number {
+        var key = canonicalName(name).toLower();
+        for (var i = 0; i < names.size(); i++) {
+            if (canonicalName(names[i].toString()).toLower().compareTo(key) == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    function addConfiguredNameIfMissing(name as String) as Void {
+        var clean = canonicalName(name);
+        if (clean.length() == 0) {
+            return;
+        }
+        var stats = loadLocalPlayerStats();
+        var names = stats[0];
+        var counts = stats[1];
+        if (findKnownPlayerIndex(names, clean) >= 0) {
+            return;
+        }
+        names.add(clean);
+        counts.add(0);
+        saveLocalPlayerStats(names, counts);
+    }
+
+    function incrementGamesForCurrentPlayers() as Void {
+        var stats = loadLocalPlayerStats();
+        var names = stats[0];
+        var counts = stats[1];
+        for (var i = 0; i < playerNames.size(); i++) {
+            var clean = canonicalName(playerNames[i]);
+            if (clean.length() == 0) {
+                continue;
+            }
+            var idx = findKnownPlayerIndex(names, clean);
+            if (idx < 0) {
+                names.add(clean);
+                counts.add(1);
+            } else {
+                counts[idx] = (counts[idx] as Number) + 1;
+            }
+        }
+        saveLocalPlayerStats(names, counts);
+    }
+
+    function getGamesPlayedForKnownName(name as String) as Number {
+        var clean = canonicalName(name);
+        if (clean.length() == 0) {
+            return 0;
+        }
+        var stats = loadLocalPlayerStats();
+        var names = stats[0];
+        var counts = stats[1];
+        var idx = findKnownPlayerIndex(names, clean);
+        if (idx < 0) {
+            return 0;
+        }
+        return counts[idx] as Number;
+    }
+
+    function getConfiguredNamesByFirstLetter(letter as String) as Array<String> {
+        var out = [] as Array<String>;
+        if (letter == null || letter.length() == 0) {
+            return out;
+        }
+        var wanted = letter.substring(0, 1).toUpper();
+        var stats = loadLocalPlayerStats();
+        var names = stats[0];
+        var counts = stats[1];
+        var idxs = [] as Array<Number>;
+        for (var i = 0; i < names.size(); i++) {
+            var n = names[i].toString();
+            if (n.length() > 0 && n.substring(0, 1).toUpper().compareTo(wanted) == 0) {
+                idxs.add(i);
+            }
+        }
+        if (idxs.size() == 0) {
+            // Fallback: show all known names when selected letter has none.
+            for (var iAll = 0; iAll < names.size(); iAll++) {
+                idxs.add(iAll);
+            }
+        }
+        for (var a = 0; a < idxs.size(); a++) {
+            var best = a;
+            for (var b = a + 1; b < idxs.size(); b++) {
+                var ia = idxs[best];
+                var ib = idxs[b];
+                if ((counts[ib] as Number) > (counts[ia] as Number)) {
+                    best = b;
+                }
+            }
+            if (best != a) {
+                var t = idxs[a];
+                idxs[a] = idxs[best];
+                idxs[best] = t;
+            }
+        }
+        for (var k = 0; k < idxs.size(); k++) {
+            out.add(names[idxs[k]].toString());
+        }
+        return out;
     }
 
     // Temporary compatibility shim while migrating old call sites.

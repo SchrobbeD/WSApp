@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<properties>
+    <property id="playerStatsDefaults" type="string">Robbe:2;Toby:5;Vic:8;Anna:6</property>
+    <property id="playerStats" type="string"></property>
+</properties>

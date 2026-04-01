@@ -2,6 +2,7 @@ import Toybox.Application;
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.System;
+import Toybox.Timer;
 import Toybox.WatchUi;
 
 class WallStrikeExitConfirmView extends WatchUi.View {
@@ -67,8 +68,23 @@ class WallStrikeExitConfirmView extends WatchUi.View {
 
 class WallStrikeExitConfirmDelegate extends WatchUi.BehaviorDelegate {
 
+    var _exitTimer as Timer.Timer?;
+
     function initialize() {
         BehaviorDelegate.initialize();
+        _exitTimer = null;
+    }
+
+    function scheduleExit() as Void {
+        if (_exitTimer != null) {
+            _exitTimer.stop();
+        }
+        _exitTimer = new Timer.Timer();
+        _exitTimer.start(method(:doExit), 50, false);
+    }
+
+    function doExit() as Void {
+        System.exit();
     }
 
     function selectedIndex() as Number {
@@ -87,13 +103,13 @@ class WallStrikeExitConfirmDelegate extends WatchUi.BehaviorDelegate {
         var idx = selectedIndex();
         if (idx == 0) {
             st.stopFitRecordingIfNeeded();
-            System.exit();
-        }
-        if (idx == 1) {
+            scheduleExit();
+        } else if (idx == 1) {
             st.discardFitRecordingIfNeeded();
-            System.exit();
+            scheduleExit();
+        } else {
+            WatchUi.popView(WatchUi.SLIDE_IMMEDIATE);
         }
-        WatchUi.popView(WatchUi.SLIDE_IMMEDIATE);
         return true;
     }
 
