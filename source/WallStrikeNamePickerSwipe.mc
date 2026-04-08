@@ -22,10 +22,16 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
     var _focusRow as Number;
     var _scrollTop as Number;
     var _names as Array<String>;
+    var _knownNames as Array<Lang.Object>;
+    var _knownCounts as Array<Lang.Object>;
+    var _knownOrder as Array<Number>;
     var _tapRowH as Number;
     var _tapListTop as Number;
     var _tapHeaderBottom as Number;
     var _tapNewBottom as Number;
+    var _pendingLetterIndex as Number;
+    var _pendingLetterSinceMs as Number;
+    var _reloadDebounceMs as Number;
 
     function initialize(playerIndex as Number) {
         View.initialize();
@@ -35,10 +41,17 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
         _focusRow = 0;
         _scrollTop = 0;
         _names = [] as Array<String>;
+        _knownNames = [] as Array<Lang.Object>;
+        _knownCounts = [] as Array<Lang.Object>;
+        _knownOrder = [] as Array<Number>;
         _tapRowH = 20;
         _tapListTop = wsTopSafe();
         _tapHeaderBottom = wsTopSafe();
         _tapNewBottom = wsTopSafe();
+        _pendingLetterIndex = -1;
+        _pendingLetterSinceMs = 0;
+        _reloadDebounceMs = 70;
+        buildKnownCache();
         syncLetterToCurrentName();
         reloadNames();
     }
@@ -94,7 +107,8 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
         idx = wrappedIndex(idx);
         if (idx != _letterIndex) {
             _letterIndex = idx;
-            reloadNames();
+            _pendingLetterIndex = idx;
+            _pendingLetterSinceMs = System.getTimer();
         }
     }
 
@@ -164,48 +178,74 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
         }
     }
 
-    function reloadNames() as Void {
+    function buildKnownCache() as Void {
         var st = appWallState();
         var stats = st.loadLocalPlayerStats();
-        var knownNames = stats[0];
-        var knownCounts = stats[1];
-        var wanted = letter();
-        var idxs = [] as Array<Number>;
-        for (var i = 0; i < knownNames.size() && i < knownCounts.size(); i++) {
-            var n = knownNames[i].toString();
-            if (n.length() > 0 && n.substring(0, 1).toUpper().compareTo(wanted) == 0) {
-                idxs.add(i);
-            }
+        _knownNames = stats[0];
+        _knownCounts = stats[1];
+        _knownOrder = [] as Array<Number>;
+        for (var i = 0; i < _knownNames.size() && i < _knownCounts.size(); i++) {
+            _knownOrder.add(i);
         }
-        if (idxs.size() == 0) {
-            // Fallback: when no names for this letter, show full known list.
-            for (var j = 0; j < knownNames.size() && j < knownCounts.size(); j++) {
-                idxs.add(j);
-            }
-        }
-        // Sort by games played desc (small lists; in-place selection sort to avoid extra allocations).
-        for (var a = 0; a < idxs.size(); a++) {
+        // Sort once by games-played desc and reuse order while view is alive.
+        for (var a = 0; a < _knownOrder.size(); a++) {
             var best = a;
-            for (var b = a + 1; b < idxs.size(); b++) {
-                var ia = idxs[best];
-                var ib = idxs[b];
-                if ((knownCounts[ib] as Number) > (knownCounts[ia] as Number)) {
+            for (var b = a + 1; b < _knownOrder.size(); b++) {
+                var ia = _knownOrder[best];
+                var ib = _knownOrder[b];
+                if ((_knownCounts[ib] as Number) > (_knownCounts[ia] as Number)) {
                     best = b;
                 }
             }
             if (best != a) {
-                var t = idxs[a];
-                idxs[a] = idxs[best];
-                idxs[best] = t;
+                var t = _knownOrder[a];
+                _knownOrder[a] = _knownOrder[best];
+                _knownOrder[best] = t;
             }
         }
+    }
+
+    function reloadNames() as Void {
+        if (_knownOrder.size() == 0 && _knownNames.size() == 0) {
+            buildKnownCache();
+        }
+        var wanted = letter();
         _names = [] as Array<String>;
-        for (var k = 0; k < idxs.size(); k++) {
-            _names.add(knownNames[idxs[k]].toString());
+        for (var i = 0; i < _knownOrder.size(); i++) {
+            var idx = _knownOrder[i];
+            var n = _knownNames[idx].toString();
+            if (n.length() > 0 && n.substring(0, 1).toUpper().compareTo(wanted) == 0) {
+                _names.add(n);
+            }
+        }
+        if (_names.size() == 0) {
+            // Fallback: when no names for this letter, show full known list.
+            for (var j = 0; j < _knownOrder.size(); j++) {
+                _names.add(_knownNames[_knownOrder[j]].toString());
+            }
         }
         // Start with no selection. User can swipe up to select "New".
         _focusRow = -2;
         _scrollTop = 0;
+        _pendingLetterIndex = -1;
+        _pendingLetterSinceMs = 0;
+    }
+
+    function processPendingLetterReload(nowMs as Number) as Boolean {
+        if (_pendingLetterIndex < 0) {
+            return false;
+        }
+        if (nowMs - _pendingLetterSinceMs < _reloadDebounceMs) {
+            return false;
+        }
+        reloadNames();
+        return true;
+    }
+
+    function flushPendingLetterReload() as Void {
+        if (_pendingLetterIndex >= 0) {
+            reloadNames();
+        }
     }
 
     function ensureVisibleRows(visibleRows as Number) as Void {
@@ -232,6 +272,7 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
+        processPendingLetterReload(System.getTimer());
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
@@ -351,10 +392,11 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         _animTimer = null;
         _lastTickMs = 0;
         _lastFrameMs = 0;
-        _frameIntervalMs = 66; // ~15 FPS cap for stable watch performance.
+        _frameIntervalMs = 50; // ~20 FPS cap; smoother but still conservative for watches.
     }
 
     function activateFocused() as Boolean {
+        _view.flushPendingLetterReload();
         var st = appWallState();
         var pIdx = _view.playerIndex();
         if (pIdx < 0 || pIdx >= st.playerNames.size()) {
@@ -426,7 +468,7 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         _lastTickMs = System.getTimer();
         _lastFrameMs = _lastTickMs;
         _animTimer = new Timer.Timer();
-        _animTimer.start(method(:onAnimTick), 40, true);
+        _animTimer.start(method(:onAnimTick), 25, true);
     }
 
     function updateAnimation(now as Number) as Boolean {
@@ -455,6 +497,7 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
 
     function onAnimTick() as Void {
         var now = System.getTimer();
+        _view.processPendingLetterReload(now);
         var changed = updateAnimation(now);
         if (!_animActive && !_dragging) {
             stopAnimTimer();
