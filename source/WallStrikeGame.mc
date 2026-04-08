@@ -387,8 +387,14 @@ class WallStrikeGameDelegate extends WatchUi.BehaviorDelegate {
             WatchUi.switchToView(new WallStrikeHubView(), new WallStrikeHubDelegate(), WatchUi.SLIDE_RIGHT);
             return true;
         }
-        st.resetForFreshSetupKeepNames();
-        WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_RIGHT);
+        if (st.hasFinishedAllGames()) {
+            st.resetForFreshSetupKeepNames();
+            st.namesRowFocus = 0;
+            WatchUi.switchToView(new WallStrikeWizardView(), new WallStrikeWizardDelegate(), WatchUi.SLIDE_RIGHT);
+            return true;
+        }
+        st.gameRowFocus = 0;
+        WatchUi.pushView(new WallStrikeGameMenuConfirmView(), new WallStrikeGameMenuConfirmDelegate(), WatchUi.SLIDE_UP);
         return true;
     }
 

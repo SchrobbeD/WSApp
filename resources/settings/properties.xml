@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <properties>
-    <property id="playerStatsDefaults" type="string">Robbe:2;Toby:5;Vic:8;Anna:6</property>
+    <property id="playerStatsDefaults" type="string">Kristof:0;Hendrik:0;Rik:0;Vic:0;Thomas:0;Ferre:0;Maarten:0;Lenny:0;Evert:0;Ben:0;Daan:0;Robin:0;Mats:0;Siebe:0;Yarne:0;Bosche:0;Jelle:0;Stijn:0;Toby:0;Jochem:0;Glenn:0;Robbe:0;Thijs:0;Mathias:0;Ibe:0;Kobe:0;Louis:0;Simon:0</property>
     <property id="playerStats" type="string"></property>
 </properties>

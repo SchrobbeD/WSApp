@@ -5,11 +5,13 @@ import Toybox.Attention;
 import Toybox.Timer;
 import Toybox.WatchUi;
 
+var WS_ALPHABET = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+] as Array<String>;
+
 function wsAlphabet() as Array<String> {
-    return [
-        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-        "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
-    ] as Array<String>;
+    return WS_ALPHABET;
 }
 
 class WallStrikeNamePickerSwipeView extends WatchUi.View {
@@ -20,7 +22,6 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
     var _focusRow as Number;
     var _scrollTop as Number;
     var _names as Array<String>;
-    var _played as Array<Number>;
     var _tapRowH as Number;
     var _tapListTop as Number;
     var _tapHeaderBottom as Number;
@@ -34,7 +35,6 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
         _focusRow = 0;
         _scrollTop = 0;
         _names = [] as Array<String>;
-        _played = [] as Array<Number>;
         _tapRowH = 20;
         _tapListTop = wsTopSafe();
         _tapHeaderBottom = wsTopSafe();
@@ -84,13 +84,10 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
     }
 
     function setLetterPos(pos as Number) as Void {
-        var n = wsAlphabet().size() * 1000;
-        var p = pos;
-        while (p < 0) {
-            p = p + n;
-        }
-        while (p >= n) {
-            p = p - n;
+        var span = wsAlphabet().size() * 1000;
+        var p = pos % span;
+        if (p < 0) {
+            p = p + span;
         }
         _letterPos = p;
         var idx = (_letterPos + 500) / 1000;
@@ -126,11 +123,7 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
     }
 
     function playedAtRow(row as Number) as Number {
-        var idx = row;
-        if (idx < 0 || idx >= _played.size()) {
-            return 0;
-        }
-        return _played[idx];
+        return 0;
     }
 
     function focusedRow() as Number {
@@ -173,22 +166,42 @@ class WallStrikeNamePickerSwipeView extends WatchUi.View {
 
     function reloadNames() as Void {
         var st = appWallState();
-        _names = st.getConfiguredNamesByFirstLetter(letter());
-        _played = [] as Array<Number>;
-        // Build once on reload; avoid storage/parsing reads in onUpdate.
         var stats = st.loadLocalPlayerStats();
         var knownNames = stats[0];
         var knownCounts = stats[1];
-        for (var i = 0; i < _names.size(); i++) {
-            var n = _names[i];
-            var count = 0;
-            for (var k = 0; k < knownNames.size() && k < knownCounts.size(); k++) {
-                if (knownNames[k].toString().toLower().compareTo(n.toLower()) == 0) {
-                    count = knownCounts[k] as Number;
-                    break;
+        var wanted = letter();
+        var idxs = [] as Array<Number>;
+        for (var i = 0; i < knownNames.size() && i < knownCounts.size(); i++) {
+            var n = knownNames[i].toString();
+            if (n.length() > 0 && n.substring(0, 1).toUpper().compareTo(wanted) == 0) {
+                idxs.add(i);
+            }
+        }
+        if (idxs.size() == 0) {
+            // Fallback: when no names for this letter, show full known list.
+            for (var j = 0; j < knownNames.size() && j < knownCounts.size(); j++) {
+                idxs.add(j);
+            }
+        }
+        // Sort by games played desc (small lists; in-place selection sort to avoid extra allocations).
+        for (var a = 0; a < idxs.size(); a++) {
+            var best = a;
+            for (var b = a + 1; b < idxs.size(); b++) {
+                var ia = idxs[best];
+                var ib = idxs[b];
+                if ((knownCounts[ib] as Number) > (knownCounts[ia] as Number)) {
+                    best = b;
                 }
             }
-            _played.add(count);
+            if (best != a) {
+                var t = idxs[a];
+                idxs[a] = idxs[best];
+                idxs[best] = t;
+            }
+        }
+        _names = [] as Array<String>;
+        for (var k = 0; k < idxs.size(); k++) {
+            _names.add(knownNames[idxs[k]].toString());
         }
         // Start with no selection. User can swipe up to select "New".
         _focusRow = -2;
@@ -315,9 +328,14 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
     var _dragging as Boolean;
     var _lastDragX as Number;
     var _lastDragMs as Number;
-    var _letterVel as Number;
-    var _momentum as Timer.Timer?;
+    var _animPos as Number;
+    var _animVel as Number;
+    var _animTarget as Number;
+    var _animActive as Boolean;
+    var _animTimer as Timer.Timer?;
     var _lastTickMs as Number;
+    var _lastFrameMs as Number;
+    var _frameIntervalMs as Number;
 
     function initialize(view as WallStrikeNamePickerSwipeView) {
         BehaviorDelegate.initialize();
@@ -326,9 +344,14 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         _dragging = false;
         _lastDragX = 0;
         _lastDragMs = 0;
-        _letterVel = 0;
-        _momentum = null;
+        _animPos = _view.letterPos();
+        _animVel = 0;
+        _animTarget = _animPos;
+        _animActive = false;
+        _animTimer = null;
         _lastTickMs = 0;
+        _lastFrameMs = 0;
+        _frameIntervalMs = 66; // ~15 FPS cap for stable watch performance.
     }
 
     function activateFocused() as Boolean {
@@ -374,10 +397,12 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         if (count < 1) {
             count = 1;
         }
-        for (var i = 0; i < count; i++) {
-            _view.shiftLetter(step);
-            buzzStep();
-        }
+        _animPos = _view.letterPos();
+        _animTarget = _animPos + (step * count * 1000);
+        _animVel = step * 12000;
+        _animActive = true;
+        buzzStep();
+        ensureAnimTimerRunning();
     }
 
     function absNum(v as Number) as Number {
@@ -387,35 +412,60 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         return v;
     }
 
-    function stopMomentum() as Void {
-        if (_momentum != null) {
-            _momentum.stop();
-            _momentum = null;
+    function stopAnimTimer() as Void {
+        if (_animTimer != null) {
+            _animTimer.stop();
+            _animTimer = null;
         }
     }
 
-    function startMomentum() as Void {
-        stopMomentum();
+    function ensureAnimTimerRunning() as Void {
+        if (_animTimer != null) {
+            return;
+        }
         _lastTickMs = System.getTimer();
-        _momentum = new Timer.Timer();
-        _momentum.start(method(:onMomentumTick), 30, true);
+        _lastFrameMs = _lastTickMs;
+        _animTimer = new Timer.Timer();
+        _animTimer.start(method(:onAnimTick), 40, true);
     }
 
-    function onMomentumTick() as Void {
-        var now = System.getTimer();
+    function updateAnimation(now as Number) as Boolean {
+        if (!_animActive) {
+            return false;
+        }
         var dtMs = now - _lastTickMs;
         _lastTickMs = now;
         if (dtMs <= 0) {
-            dtMs = 30;
+            dtMs = 1;
+        } else if (dtMs > 120) {
+            dtMs = 120;
         }
-        var deltaPos = (_letterVel * dtMs) / 1000; // letterPos is in 1/1000 letter units
-        _view.setLetterPos(_view.letterPos() + deltaPos);
-        _letterVel = (_letterVel * 90) / 100;
-        if (absNum(_letterVel) < 250) {
-            stopMomentum();
+        var dist = _animTarget - _animPos;
+        var accel = (dist * 30) / 100;
+        _animVel = ((_animVel * 82) / 100) + accel;
+        _animPos = _animPos + ((_animVel * dtMs) / 1000);
+        if (absNum(dist) < 12 && absNum(_animVel) < 120) {
+            _animPos = _animTarget;
+            _animVel = 0;
+            _animActive = false;
+        }
+        _view.setLetterPos(_animPos);
+        return true;
+    }
+
+    function onAnimTick() as Void {
+        var now = System.getTimer();
+        var changed = updateAnimation(now);
+        if (!_animActive && !_dragging) {
+            stopAnimTimer();
             _view.snapToNearestLetter();
+            WatchUi.requestUpdate();
+            return;
         }
-        WatchUi.requestUpdate();
+        if (changed && (now - _lastFrameMs >= _frameIntervalMs)) {
+            _lastFrameMs = now;
+            WatchUi.requestUpdate();
+        }
     }
 
     function onPreviousPage() as Boolean {
@@ -473,12 +523,10 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
         var dir = swipeEvent.getDirection();
         if (dir == WatchUi.SWIPE_LEFT) {
             shiftLettersWithBuzz(1, hops);
-            WatchUi.requestUpdate();
             return true;
         }
         if (dir == WatchUi.SWIPE_RIGHT) {
             shiftLettersWithBuzz(-1, hops);
-            WatchUi.requestUpdate();
             return true;
         }
         return false;
@@ -495,8 +543,11 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
             _dragging = true;
             _lastDragX = x;
             _lastDragMs = now;
-            _letterVel = 0;
-            stopMomentum();
+            _animVel = 0;
+            _animActive = false;
+            _animPos = _view.letterPos();
+            _animTarget = _animPos;
+            stopAnimTimer();
             return true;
         }
         var dx = x - _lastDragX;
@@ -505,11 +556,15 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
             dtMs = 1;
         }
         var dLetters = -((dx * 1000) / stepPx);
-        _view.setLetterPos(_view.letterPos() + dLetters);
-        _letterVel = (dLetters * 1000) / dtMs;
+        _animPos = _view.letterPos() + dLetters;
+        _view.setLetterPos(_animPos);
+        _animVel = (dLetters * 1000) / dtMs;
         _lastDragX = x;
         _lastDragMs = now;
-        WatchUi.requestUpdate();
+        if (now - _lastFrameMs >= _frameIntervalMs) {
+            _lastFrameMs = now;
+            WatchUi.requestUpdate();
+        }
         return true;
     }
 
@@ -518,8 +573,11 @@ class WallStrikeNamePickerSwipeDelegate extends WatchUi.BehaviorDelegate {
             return false;
         }
         _dragging = false;
-        if (absNum(_letterVel) > 300) {
-            startMomentum();
+        _animPos = _view.letterPos();
+        if (absNum(_animVel) > 300) {
+            _animTarget = _animPos + (_animVel / 3);
+            _animActive = true;
+            ensureAnimTimerRunning();
         } else {
             _view.snapToNearestLetter();
             WatchUi.requestUpdate();

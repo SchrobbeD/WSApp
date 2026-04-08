@@ -595,8 +595,11 @@ class WallStrikeState {
             var place = i + 1;
             var pts = 0;
             if (systemId == 1) {
-                if (i < xdown.size()) {
-                    pts = xdown[i];
+                // X-Down is inverted vs elimination list:
+                // first out gets lowest points, last remaining gets highest.
+                var rev = xdown.size() - 1 - i;
+                if (rev >= 0 && rev < xdown.size()) {
+                    pts = xdown[rev];
                 }
             } else {
                 // Ascending + Lives: place points (1..N) by elimination order.
@@ -792,10 +795,10 @@ class WallStrikeState {
     }
 
     function isDigitChar(c as String) as Boolean {
-        if (c == null || c.length() == 0) {
+        if (c == null || c.length() != 1) {
             return false;
         }
-        return strEq(c, "0") || strEq(c, "1") || strEq(c, "2") || strEq(c, "3") || strEq(c, "4") || strEq(c, "5") || strEq(c, "6") || strEq(c, "7") || strEq(c, "8") || strEq(c, "9");
+        return c.compareTo("0") >= 0 && c.compareTo("9") <= 0;
     }
 
     function isLetterChar(c as String) as Boolean {
@@ -868,19 +871,28 @@ class WallStrikeState {
 
     function normalizeNameToken(raw as String) as String {
         var n = trimStringSafe(raw);
-        while (n.length() > 0) {
-            var first = n.substring(0, 1);
-            if (isAlphaNumChar(first)) {
+        var len = n.length();
+        var a = 0;
+        while (a < len) {
+            var ch = n.substring(a, a + 1);
+            if (isAlphaNumChar(ch)) {
                 break;
             }
-            n = trimStringSafe(n.substring(1, n.length()));
+            a++;
         }
-        while (n.length() > 0) {
-            var last = n.substring(n.length() - 1, n.length());
-            if (isAlphaNumChar(last)) {
+        var b = len;
+        while (b > a) {
+            var ch2 = n.substring(b - 1, b);
+            if (isAlphaNumChar(ch2)) {
                 break;
             }
-            n = trimStringSafe(n.substring(0, n.length() - 1));
+            b--;
+        }
+        if (a >= b) {
+            return "";
+        }
+        if (a > 0 || b < len) {
+            return trimStringSafe(n.substring(a, b));
         }
         return n;
     }
@@ -889,25 +901,107 @@ class WallStrikeState {
         return sanitizeNameEntry(raw);
     }
 
-    function buildPlayerStatsRaw(names as Array<Lang.Object>, counts as Array<Lang.Object>) as String {
+    function isPlaceholderPlayerName(raw as String) as Boolean {
+        var n = canonicalName(raw);
+        if (n.length() < 2) {
+            return false;
+        }
+        var first = n.substring(0, 1).toUpper();
+        if (first.compareTo("P") != 0) {
+            return false;
+        }
+        var rest = n.substring(1, n.length());
+        if (!isStrictWholeNumber(rest)) {
+            return false;
+        }
+        var num = parseWholeNumberStrict(rest);
+        return num != null && (num as Number) > 0;
+    }
+
+    //! Serialize stats without re-canonicalizing (caller must pass deduped, clean names).
+    function buildPlayerStatsRawTrusted(names as Array<Lang.Object>, counts as Array<Lang.Object>) as String {
         var raw = "";
         for (var i = 0; i < names.size() && i < counts.size(); i++) {
-            var n = canonicalName(names[i].toString());
-            var c = counts[i];
+            var n = names[i].toString();
             if (n.length() == 0) {
                 continue;
             }
             if (raw.length() > 0) {
                 raw = raw + ";";
             }
-            raw = raw + n + ":" + c;
+            raw = raw + n + ":" + counts[i];
         }
         return raw;
+    }
+
+    function countSemicolonsInStatsRaw(raw as String) as Number {
+        var n = 0;
+        for (var i = 0; i < raw.length(); i++) {
+            if (raw.substring(i, i + 1).compareTo(";") == 0) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    function playerStatsRawLooksCorrupt(raw as String) as Boolean {
+        if (raw.length() == 0) {
+            return false;
+        }
+        if (raw.length() > 4500) {
+            return true;
+        }
+        return countSemicolonsInStatsRaw(raw) > 120;
+    }
+
+    function parseSemicolonSeparatedPlayerStats(raw as String) as Array<Array<Lang.Object>> {
+        var names = [] as Array<Lang.Object>;
+        var counts = [] as Array<Lang.Object>;
+        var i = 0;
+        while (i <= raw.length()) {
+            var entryStart = i;
+            while (i < raw.length() && raw.substring(i, i + 1).compareTo(";") != 0) {
+                i++;
+            }
+            var entry = trimStringSafe(raw.substring(entryStart, i));
+            if (i < raw.length()) {
+                i++;
+            } else {
+                i = i + 1;
+            }
+            if (entry.length() == 0) {
+                continue;
+            }
+
+            var sep = -1;
+            var j = entry.length() - 1;
+            while (j >= 0) {
+                if (entry.substring(j, j + 1).compareTo(":") == 0) {
+                    sep = j;
+                    break;
+                }
+                j--;
+            }
+            if (sep <= 0 || sep >= entry.length() - 1) {
+                continue;
+            }
+
+            var n = canonicalName(entry.substring(0, sep));
+            var cRaw = trimStringSafe(entry.substring(sep + 1, entry.length()));
+            var cNum = parseWholeNumberStrict(cRaw);
+            if (n.length() == 0 || cRaw.length() == 0 || cNum == null) {
+                continue;
+            }
+            names.add(n);
+            counts.add(cNum);
+        }
+        return [names, counts];
     }
 
     function dedupeStats(names as Array<Lang.Object>, counts as Array<Lang.Object>) as Array<Array<Lang.Object>> {
         var outNames = [] as Array<Lang.Object>;
         var outCounts = [] as Array<Lang.Object>;
+        var outKeys = [] as Array<String>;
         for (var i = 0; i < names.size() && i < counts.size(); i++) {
             var n = canonicalName(names[i].toString());
             if (n.length() == 0) {
@@ -916,9 +1010,8 @@ class WallStrikeState {
             var c = counts[i] as Number;
             var key = n.toLower();
             var idx = -1;
-            for (var k = 0; k < outNames.size(); k++) {
-                var existing = canonicalName(outNames[k].toString()).toLower();
-                if (strEq(existing, key)) {
+            for (var k = 0; k < outKeys.size(); k++) {
+                if (outKeys[k].compareTo(key) == 0) {
                     idx = k;
                     break;
                 }
@@ -926,12 +1019,49 @@ class WallStrikeState {
             if (idx < 0) {
                 outNames.add(n);
                 outCounts.add(c);
+                outKeys.add(key);
             } else if (c > (outCounts[idx] as Number)) {
                 // Keep the highest observed count when cleaning corrupted duplicates.
                 outCounts[idx] = c;
             }
         }
         return [outNames, outCounts];
+    }
+
+    //! Reset bloated/corrupt runtime stats to the bundled default name list (counts from defaults).
+    function selfHealPlayerStatsFromDefaults(defaultsRaw as String) as Array<Array<Lang.Object>> {
+        var parsed = parseSemicolonSeparatedPlayerStats(defaultsRaw);
+        var names = parsed[0];
+        var counts = parsed[1];
+        var deduped = dedupeStats(names, counts);
+        names = deduped[0];
+        counts = deduped[1];
+        var trusted = buildPlayerStatsRawTrusted(names, counts);
+        try {
+            Application.Properties.setValue("playerStats", trusted);
+        } catch (eHeal) {
+        }
+        return [names, counts];
+    }
+
+    function resetKnownNamesToDefaults() as Void {
+        var defaultsRaw = "";
+        try {
+            var pDef = Application.Properties.getValue("playerStatsDefaults");
+            if (pDef != null) {
+                defaultsRaw = pDef.toString();
+            }
+        } catch (eDef) {
+            defaultsRaw = "";
+        }
+        if (defaultsRaw.length() > 0) {
+            selfHealPlayerStatsFromDefaults(defaultsRaw);
+            return;
+        }
+        try {
+            Application.Properties.setValue("playerStats", "");
+        } catch (eClear) {
+        }
     }
 
     function loadLocalPlayerStats() as Array<Array<Lang.Object>> {
@@ -955,58 +1085,35 @@ class WallStrikeState {
         } catch (e) {
             raw = "";
         }
+        var hadStoredRuntime = raw.length() > 0;
         // If no runtime list exists yet, seed from defaults.
         if (raw.length() == 0 && defaultsRaw.length() > 0) {
             raw = defaultsRaw;
         }
-        var parsedItems = 0;
-        var i = 0;
-        while (i <= raw.length()) {
-            var entryStart = i;
-            while (i < raw.length() && !strEq(raw.substring(i, i + 1), ";")) {
-                i++;
-            }
-            var entry = trimStringSafe(raw.substring(entryStart, i));
-            if (i < raw.length()) {
-                i++; // skip ';'
-            } else {
-                i = i + 1; // end loop
-            }
-            if (entry.length() == 0) {
-                continue;
-            }
 
-            var sep = -1;
-            var j = entry.length() - 1;
-            while (j >= 0) {
-                if (strEq(entry.substring(j, j + 1), ":")) {
-                    sep = j;
-                    break;
-                }
-                j--;
+        if (hadStoredRuntime && playerStatsRawLooksCorrupt(raw)) {
+            if (defaultsRaw.length() > 0) {
+                return selfHealPlayerStatsFromDefaults(defaultsRaw);
             }
-            if (sep <= 0 || sep >= entry.length() - 1) {
-                continue;
+            try {
+                Application.Properties.setValue("playerStats", "");
+            } catch (eClear) {
             }
-
-            var n = canonicalName(entry.substring(0, sep));
-            var cRaw = trimStringSafe(entry.substring(sep + 1, entry.length()));
-            var cNum = parseWholeNumberStrict(cRaw);
-            if (n.length() == 0 || cRaw.length() == 0 || cNum == null) {
-                continue;
-            }
-            var c = 0;
-            c = cNum;
-            if (n.length() > 0) {
-                names.add(n);
-                counts.add(c);
-                parsedItems++;
-            }
+            return [names, counts];
         }
+
+        var parsed = parseSemicolonSeparatedPlayerStats(raw);
+        names = parsed[0];
+        counts = parsed[1];
         var deduped = dedupeStats(names, counts);
         names = deduped[0];
         counts = deduped[1];
-        var canonicalRaw = buildPlayerStatsRaw(names, counts);
+
+        if (hadStoredRuntime && names.size() > 100 && defaultsRaw.length() > 0) {
+            return selfHealPlayerStatsFromDefaults(defaultsRaw);
+        }
+
+        var canonicalRaw = buildPlayerStatsRawTrusted(names, counts);
         if (raw.compareTo(canonicalRaw) != 0) {
             saveLocalPlayerStats(names, counts);
         }
@@ -1017,7 +1124,7 @@ class WallStrikeState {
         var deduped = dedupeStats(names, counts);
         names = deduped[0];
         counts = deduped[1];
-        var raw = buildPlayerStatsRaw(names, counts);
+        var raw = buildPlayerStatsRawTrusted(names, counts);
         try {
             Application.Properties.setValue("playerStats", raw);
         } catch (e) {
@@ -1039,6 +1146,9 @@ class WallStrikeState {
         if (clean.length() == 0) {
             return;
         }
+        if (isPlaceholderPlayerName(clean)) {
+            return;
+        }
         var stats = loadLocalPlayerStats();
         var names = stats[0];
         var counts = stats[1];
@@ -1052,17 +1162,33 @@ class WallStrikeState {
 
     function incrementGamesForCurrentPlayers() as Void {
         var stats = loadLocalPlayerStats();
-        var names = stats[0];
-        var counts = stats[1];
+        var deduped = dedupeStats(stats[0], stats[1]);
+        var names = deduped[0];
+        var counts = deduped[1];
+        var keys = [] as Array<String>;
+        for (var k = 0; k < names.size(); k++) {
+            keys.add(canonicalName(names[k].toString()).toLower());
+        }
         for (var i = 0; i < playerNames.size(); i++) {
             var clean = canonicalName(playerNames[i]);
             if (clean.length() == 0) {
                 continue;
             }
-            var idx = findKnownPlayerIndex(names, clean);
+            if (isPlaceholderPlayerName(clean)) {
+                continue;
+            }
+            var key = clean.toLower();
+            var idx = -1;
+            for (var j = 0; j < keys.size(); j++) {
+                if (keys[j].compareTo(key) == 0) {
+                    idx = j;
+                    break;
+                }
+            }
             if (idx < 0) {
                 names.add(clean);
                 counts.add(1);
+                keys.add(key);
             } else {
                 counts[idx] = (counts[idx] as Number) + 1;
             }
